@@ -1,4 +1,9 @@
+// Copyright (c) .NET Foundation. All rights reserved.
+// Licensed under the Apache License, Version 2.0. See License.txt in the project root for license information.
+
 using System;
+using System.Collections.Generic;
+using System.Net;
 using Microsoft.AspNetCore.Server.Kestrel.Filter;
 
 namespace Microsoft.AspNetCore.Server.Kestrel
@@ -8,6 +13,8 @@ namespace Microsoft.AspNetCore.Server.Kestrel
     /// </summary>
     public class KestrelServerOptions
     {
+        private List<ListenDescriptor> Endpoints { get; } = new List<ListenDescriptor>();
+
         /// <summary>
         /// Gets or sets whether the <c>Server</c> header should be included in each response.
         /// </summary>
@@ -114,6 +121,108 @@ namespace Microsoft.AspNetCore.Server.Kestrel
 
                 return threadCount;
             }
+        }
+
+        public void Listen(IPAddress address, int port)
+        {
+            Listen(address, port, _ => { });
+        }
+
+        public void Listen(IPAddress address, int port, Action<ListenOptions> configure)
+        {
+            if (address == null)
+            {
+                throw new ArgumentNullException(nameof(address));
+            }
+            if (configure == null)
+            {
+                throw new ArgumentNullException(nameof(configure));
+            }
+            if (port < 0)
+            {
+                throw new ArgumentOutOfRangeException(nameof(port));
+            }
+
+            var descriptor = new ListenDescriptor
+            {
+                Type = ListenType.IPAddress,
+                IPAddress = address,
+            };
+
+            configure(descriptor.ListenOptions);
+            Endpoints.Add(descriptor);
+        }
+
+        public void ListenUnixSocket(string socketName)
+        {
+            ListenUnixSocket(socketName, _ => { });
+        }
+
+        public void ListenUnixSocket(string socketName, Action<ListenOptions> configure)
+        {
+            if (socketName == null)
+            {
+                throw new ArgumentNullException(nameof(socketName));
+            }
+            if (configure == null)
+            {
+                throw new ArgumentNullException(nameof(configure));
+            }
+
+            var descriptor = new ListenDescriptor
+            {
+                Type = ListenType.SocketName,
+                SocketName = socketName
+            };
+
+            configure(descriptor.ListenOptions);
+            Endpoints.Add(descriptor);
+        }
+
+        public void ListenFileHandle(long fileHandle)
+        {
+            ListenFileHandle(fileHandle, _ => { });
+        }
+
+        public void ListenFileHandle(long fileHandle, Action<ListenOptions> configure)
+        {
+            if (fileHandle < 0)
+            {
+                throw new ArgumentOutOfRangeException(nameof(fileHandle));
+            }
+            if (configure == null)
+            {
+                throw new ArgumentNullException(nameof(configure));
+            }
+
+            var descriptor = new ListenDescriptor
+            {
+                Type = ListenType.FileHandle,
+                FileHandle = new IntPtr(fileHandle)
+            };
+
+            configure(descriptor.ListenOptions);
+            Endpoints.Add(descriptor);
+        }
+
+        private enum ListenType
+        {
+            IPAddress,
+            SocketName,
+            FileHandle,
+        }
+
+        private class ListenDescriptor
+        {
+            public ListenType Type { get; set; }
+
+            public IPAddress IPAddress { get; set; }
+
+            public string SocketName { get; set; }
+
+            public IntPtr FileHandle { get; set; }
+
+            public ListenOptions ListenOptions { get; } = new ListenOptions();
         }
     }
 }
