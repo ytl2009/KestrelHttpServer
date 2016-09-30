@@ -3,8 +3,11 @@
 
 using System;
 using System.Collections.Generic;
+using System.Globalization;
+using System.Linq;
 using System.Net;
 using Microsoft.AspNetCore.Server.Kestrel.Filter;
+using Microsoft.AspNetCore.Server.Kestrel.Internal.Infrastructure;
 
 namespace Microsoft.AspNetCore.Server.Kestrel
 {
@@ -14,6 +17,7 @@ namespace Microsoft.AspNetCore.Server.Kestrel
     public class KestrelServerOptions
     {
         private List<ListenDescriptor> Endpoints { get; } = new List<ListenDescriptor>();
+        internal string ServerAddresses => Endpoints.Select(e => e.ToServerAddress());
 
         /// <summary>
         /// Gets or sets whether the <c>Server</c> header should be included in each response.
@@ -153,16 +157,20 @@ namespace Microsoft.AspNetCore.Server.Kestrel
             Endpoints.Add(descriptor);
         }
 
-        public void ListenUnixSocket(string socketName)
+        public void ListenUnixSocket(string socketPath)
         {
-            ListenUnixSocket(socketName, _ => { });
+            ListenUnixSocket(socketPath, _ => { });
         }
 
-        public void ListenUnixSocket(string socketName, Action<ListenOptions> configure)
+        public void ListenUnixSocket(string socketPath, Action<ListenOptions> configure)
         {
-            if (socketName == null)
+            if (socketPath == null)
             {
-                throw new ArgumentNullException(nameof(socketName));
+                throw new ArgumentNullException(nameof(socketPath));
+            }
+            if (socketPath.Length == 0 || socketPath[0] != '/')
+            {
+                throw new ArgumentException("Unix socket path must be absolute.", nameof(socketPath));
             }
             if (configure == null)
             {
@@ -171,24 +179,24 @@ namespace Microsoft.AspNetCore.Server.Kestrel
 
             var descriptor = new ListenDescriptor
             {
-                Type = ListenType.SocketName,
-                SocketName = socketName
+                Type = ListenType.SocketPath,
+                SocketPath = socketPath
             };
 
             configure(descriptor.ListenOptions);
             Endpoints.Add(descriptor);
         }
 
-        public void ListenFileHandle(long fileHandle)
+        public void ListenPipeHandle(long pipeHandle)
         {
-            ListenFileHandle(fileHandle, _ => { });
+            ListenPipeHandle(pipeHandle, _ => { });
         }
 
-        public void ListenFileHandle(long fileHandle, Action<ListenOptions> configure)
+        public void ListenPipeHandle(long pipeHandle, Action<ListenOptions> configure)
         {
-            if (fileHandle < 0)
+            if (pipeHandle < 0)
             {
-                throw new ArgumentOutOfRangeException(nameof(fileHandle));
+                throw new ArgumentOutOfRangeException(nameof(pipeHandle));
             }
             if (configure == null)
             {
@@ -197,8 +205,8 @@ namespace Microsoft.AspNetCore.Server.Kestrel
 
             var descriptor = new ListenDescriptor
             {
-                Type = ListenType.FileHandle,
-                FileHandle = new IntPtr(fileHandle)
+                Type = ListenType.PipeHandle,
+                FileHandle = pipeHandle
             };
 
             configure(descriptor.ListenOptions);
@@ -208,8 +216,8 @@ namespace Microsoft.AspNetCore.Server.Kestrel
         private enum ListenType
         {
             IPAddress,
-            SocketName,
-            FileHandle,
+            SocketPath,
+            PipeHandle,
         }
 
         private class ListenDescriptor
@@ -218,11 +226,30 @@ namespace Microsoft.AspNetCore.Server.Kestrel
 
             public IPAddress IPAddress { get; set; }
 
-            public string SocketName { get; set; }
+            public int Port { get; set; }
 
-            public IntPtr FileHandle { get; set; }
+            public string SocketPath { get; set; }
+
+            public long FileHandle { get; set; }
 
             public ListenOptions ListenOptions { get; } = new ListenOptions();
+
+            public string ToServerAddress()
+            {
+                // Use http scheme for all addresses. If https should be used for this endpoint,
+                // it can still be configured for this endpoint specifically.
+                switch (Type)
+                {
+                    case ListenType.IPAddress:
+                        return $"http://{IPAddress}:{Port}";
+                    case ListenType.SocketPath:
+                        return $"http://unix:{SocketPath}";
+                    case ListenType.PipeHandle:
+                        return $"http://{Constants.PipeDescriptorPrefix}{FileHandle.ToString(CultureInfo.InvariantCulture)}";
+                    default:
+                        throw new InvalidOperationException();
+                }
+            }
         }
     }
 }

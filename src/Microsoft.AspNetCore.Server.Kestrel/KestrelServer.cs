@@ -113,6 +113,13 @@ namespace Microsoft.AspNetCore.Server.Kestrel
                 engine.Start(threadCount);
                 var atLeastOneListener = false;
 
+                // If any endpoints are configured directly using KestrelServerOptions, replace those configured via server.urls.
+                if (Options.ServerAddresses.Any())
+                {
+                    _serverAddresses.Addresses.Clear();
+                    _serverAddresses.Addresses.Add(Options.ServerAddresses);
+                }
+
                 foreach (var address in _serverAddresses.Addresses.ToArray())
                 {
                     var parsedAddress = ServerAddress.FromUrl(address);

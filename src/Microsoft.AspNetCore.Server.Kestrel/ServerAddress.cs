@@ -15,13 +15,9 @@ namespace Microsoft.AspNetCore.Server.Kestrel
         public int Port { get; internal set; }
         public string Scheme { get; private set; }
 
-        public bool IsUnixPipe
-        {
-            get
-            {
-                return Host.StartsWith(Constants.UnixPipeHostPrefix);
-            }
-        }
+        public bool IsUnixPipe => Host.StartsWith(Constants.UnixPipeHostPrefix);
+
+        internal bool IsFileDescriptor => Host.StartsWith(Constants.FileDescriptorPrefix);
 
         public string UnixPipePath
         {
@@ -30,6 +26,24 @@ namespace Microsoft.AspNetCore.Server.Kestrel
                 Debug.Assert(IsUnixPipe);
 
                 return Host.Substring(Constants.UnixPipeHostPrefix.Length - 1);
+            }
+        }
+
+        internal IntPtr FileDescriptor
+        {
+            get
+            {
+                Debug.Assert(IsFileDescriptor);
+
+                var fdString = Host.Substring(Constants.FileDescriptorPrefix.Length - 1);
+                long fd;
+
+                if (long.TryParse(fdString, NumberStyles.None, CultureInfo.InvariantCulture, out fd))
+                {
+                    throw new FormatException($"Invalid file descriptor: {fdString}");
+                }
+
+                return new IntPtr(fd);
             }
         }
 
