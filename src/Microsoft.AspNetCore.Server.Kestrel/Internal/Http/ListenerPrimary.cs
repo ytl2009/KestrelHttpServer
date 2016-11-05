@@ -88,7 +88,7 @@ namespace Microsoft.AspNetCore.Server.Kestrel.Internal.Http
 
         protected override void DispatchConnection(UvStreamHandle socket)
         {
-            var index = _dispatchIndex++ % (_dispatchPipes.Count + 1);
+            var index = _dispatchIndex++%(_dispatchPipes.Count + 1);
             if (index == _dispatchPipes.Count)
             {
                 base.DispatchConnection(socket);
@@ -99,16 +99,32 @@ namespace Microsoft.AspNetCore.Server.Kestrel.Internal.Http
                 var dispatchPipe = _dispatchPipes[index];
                 var write = new UvWriteReq(Log);
                 write.Init(Thread.Loop);
-                write.Write2(
-                    dispatchPipe,
-                    _dummyMessage,
-                    socket,
-                    (write2, status, error, state) =>
-                    {
-                        write2.Dispose();
-                        ((UvStreamHandle)state).Dispose();
-                    },
-                    socket);
+
+                try
+                {
+                    write.Write2(
+                        dispatchPipe,
+                        _dummyMessage,
+                        socket,
+                        (write2, status, error, state) =>
+                        {
+                            write2.Dispose();
+                            ((UvStreamHandle)state).Dispose();
+                        },
+                        socket);
+                }
+                catch (UvException ex)
+                {
+                    write.Dispose();
+
+                    // Assume the pipe is dead, so remove the pipe from _dispatchPipes.
+                    // Even if all named pipes are removed, ListenerPrimary will still dispatch to itself.
+                    Log.LogError(0, ex, "ListenerPrimary.DispatchConnection failed. Removing pipe connection.");
+                    _dispatchPipes.Remove(dispatchPipe);
+
+                    // Try to dispatch connection again
+                    DispatchConnection(socket);
+                }
             }
         }
 
