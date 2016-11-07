@@ -25,7 +25,8 @@ namespace Microsoft.AspNetCore.Server.Kestrel.Internal.Http
 
         // this message is passed to write2 because it must be non-zero-length,
         // but it has no other functional significance
-        private readonly ArraySegment<ArraySegment<byte>> _dummyMessage = new ArraySegment<ArraySegment<byte>>(new[] { new ArraySegment<byte>(new byte[] { 1, 2, 3, 4 }) });
+        private readonly ArraySegment<ArraySegment<byte>> _dummyMessage =
+            new ArraySegment<ArraySegment<byte>>(new[] {new ArraySegment<byte>(new byte[] {1, 2, 3, 4})});
 
         protected ListenerPrimary(ServiceContext serviceContext) : base(serviceContext)
         {
@@ -42,15 +43,15 @@ namespace Microsoft.AspNetCore.Server.Kestrel.Internal.Http
 
             if (_fileCompletionInfoPtr == IntPtr.Zero)
             {
-                var fileCompletionInfo = new FILE_COMPLETION_INFORMATION() { Key = IntPtr.Zero, Port = IntPtr.Zero };
+                var fileCompletionInfo = new FILE_COMPLETION_INFORMATION() {Key = IntPtr.Zero, Port = IntPtr.Zero};
                 _fileCompletionInfoPtr = Marshal.AllocHGlobal(Marshal.SizeOf(fileCompletionInfo));
                 Marshal.StructureToPtr(fileCompletionInfo, _fileCompletionInfoPtr, false);
             }
 
             await StartAsync(address, thread).ConfigureAwait(false);
 
-            await Thread.PostAsync(state => ((ListenerPrimary)state).PostCallback(),
-                                   this).ConfigureAwait(false);
+            await Thread.PostAsync(state => ((ListenerPrimary) state).PostCallback(),
+                this).ConfigureAwait(false);
         }
 
         private void PostCallback()
@@ -59,7 +60,7 @@ namespace Microsoft.AspNetCore.Server.Kestrel.Internal.Http
             ListenPipe.Init(Thread.Loop, Thread.QueueCloseHandle, false);
             ListenPipe.Bind(_pipeName);
             ListenPipe.Listen(Constants.ListenBacklog,
-                (pipe, status, error, state) => ((ListenerPrimary)state).OnListenPipe(pipe, status, error), this);
+                (pipe, status, error, state) => ((ListenerPrimary) state).OnListenPipe(pipe, status, error), this);
         }
 
         private void OnListenPipe(UvStreamHandle pipe, int status, Exception error)
@@ -91,17 +92,42 @@ namespace Microsoft.AspNetCore.Server.Kestrel.Internal.Http
             var index = _dispatchIndex++%(_dispatchPipes.Count + 1);
             if (index == _dispatchPipes.Count)
             {
+                Console.WriteLine("Dispatching to Primary");
                 base.DispatchConnection(socket);
             }
             else
             {
-                DetachFromIOCP(socket);
                 var dispatchPipe = _dispatchPipes[index];
                 var write = new UvWriteReq(Log);
                 write.Init(Thread.Loop);
 
+                //try
+                //{
+                //    // Verify pipe is open
+                //    write.Write(dispatchPipe, default(MemoryPoolIterator), default(MemoryPoolIterator), 0,
+                //        (write2, status, ex, state) => { }, null);
+                //}
+                //catch (Exception ex)
+                //{
+                //    write.Dispose();
+
+                //    // Assume the pipe is dead, so remove the pipe from _dispatchPipes.
+                //    // Even if all named pipes are removed, ListenerPrimary will still dispatch to itself.
+                //    Log.LogError(0, ex, "ListenerPrimary.DispatchConnection failed. Removing pipe connection.");
+                //    dispatchPipe.Dispose();
+                //    _dispatchPipes.Remove(dispatchPipe);
+
+                //    Console.WriteLine("continue;");
+                //    // Try to dispatch connection again
+                //    DispatchConnection(socket);
+                //    return;
+                //}
+
                 try
                 {
+                    Console.WriteLine("Detaching from IOCP");
+                    DetachFromIOCP(socket);
+
                     write.Write2(
                         dispatchPipe,
                         _dummyMessage,
@@ -115,15 +141,9 @@ namespace Microsoft.AspNetCore.Server.Kestrel.Internal.Http
                 }
                 catch (UvException ex)
                 {
+                    Log.LogError(0, ex, "ListenerPrimary.DispatchConnection failed.");
                     write.Dispose();
-
-                    // Assume the pipe is dead, so remove the pipe from _dispatchPipes.
-                    // Even if all named pipes are removed, ListenerPrimary will still dispatch to itself.
-                    Log.LogError(0, ex, "ListenerPrimary.DispatchConnection failed. Removing pipe connection.");
-                    _dispatchPipes.Remove(dispatchPipe);
-
-                    // Try to dispatch connection again
-                    DispatchConnection(socket);
+                    throw;
                 }
             }
         }
@@ -183,13 +203,16 @@ namespace Microsoft.AspNetCore.Server.Kestrel.Internal.Http
 
             if (Thread.FatalError == null && ListenPipe != null)
             {
+                Console.WriteLine("ListnerPrimary.Dispose PostAsync");
                 await Thread.PostAsync(state =>
                 {
                     var listener = (ListenerPrimary)state;
+                    Console.WriteLine("ListnerPrimary.Dispose ListenPipe");
                     listener.ListenPipe.Dispose();
 
                     foreach (var dispatchPipe in listener._dispatchPipes)
                     {
+                        Console.WriteLine("ListnerPrimary.Dispose dispatchPipe");
                         dispatchPipe.Dispose();
                     }
                 }, this).ConfigureAwait(false);

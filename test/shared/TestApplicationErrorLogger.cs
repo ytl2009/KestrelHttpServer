@@ -34,9 +34,9 @@ namespace Microsoft.AspNetCore.Testing
 
         public void Log<TState>(LogLevel logLevel, EventId eventId, TState state, Exception exception, Func<TState, Exception, string> formatter)
         {
-#if false
+//#if false
             Console.WriteLine($"Log {logLevel}[{eventId}]: {formatter(state, exception)} {exception?.Message}");
-#endif
+//#endif
 
             Messages.Add(new LogMessage { LogLevel = logLevel, EventId = eventId, Exception = exception });
         }

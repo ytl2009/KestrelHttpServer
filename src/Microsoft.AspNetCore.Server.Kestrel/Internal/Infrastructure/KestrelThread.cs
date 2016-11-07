@@ -188,9 +188,12 @@ namespace Microsoft.AspNetCore.Server.Kestrel.Internal
 
         private void OnStopRude()
         {
+            Console.WriteLine("OnStopRude");
+
             Walk(ptr =>
             {
                 var handle = UvMemory.FromIntPtr<UvHandle>(ptr);
+                Console.WriteLine("Walking Handle {0}", handle?.GetType().ToString() ?? "(null)");
                 if (handle != _post)
                 {
                     // handle can be null because UvMemory.FromIntPtr looks up a weak reference
@@ -292,9 +295,11 @@ namespace Microsoft.AspNetCore.Server.Kestrel.Internal
 
             try
             {
+                Console.WriteLine("_loop.Run");
                 _loop.Run();
                 if (_stopImmediate)
                 {
+                    Console.WriteLine("_stopImmediate");
                     // thread-abort form of exit, resources will be leaked
                     return;
                 }
@@ -304,9 +309,11 @@ namespace Microsoft.AspNetCore.Server.Kestrel.Internal
                 _post.Dispose();
                 _heartbeatTimer.Dispose();
 
+                Console.WriteLine("_loop.Run 2");
                 // Ensure the Dispose operations complete in the event loop.
                 _loop.Run();
 
+                Console.WriteLine("_loop.Dispose");
                 _loop.Dispose();
             }
             catch (Exception ex)
