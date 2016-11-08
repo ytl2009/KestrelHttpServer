@@ -318,6 +318,7 @@ namespace Microsoft.AspNetCore.Server.Kestrel.Internal
             }
             catch (Exception ex)
             {
+                Console.WriteLine(ex);
                 _closeError = ExceptionDispatchInfo.Capture(ex);
                 // Request shutdown so we can rethrow this exception
                 // in Stop which should be observable.

@@ -9,9 +9,12 @@ namespace Microsoft.AspNetCore.Testing
         {
         }
 
-        public TestKestrelTrace(ILogger testLogger) : base(testLogger)
+        public TestKestrelTrace(TestApplicationErrorLogger testLogger) : base(testLogger)
         {
+            TestLogger = testLogger;
         }
+
+        public TestApplicationErrorLogger TestLogger { get; private set; }
 
         public override void ConnectionRead(string connectionId, int count)
         {

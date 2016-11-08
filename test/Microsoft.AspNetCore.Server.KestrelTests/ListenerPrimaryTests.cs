@@ -2,7 +2,8 @@
 // Licensed under the Apache License, Version 2.0. See License.txt in the project root for license information.
 
 using System;
-using System.Threading;
+using System.Linq;
+using System.Net.Http;
 using System.Threading.Tasks;
 using Microsoft.AspNetCore.Hosting.Server;
 using Microsoft.AspNetCore.Http;
@@ -12,7 +13,7 @@ using Microsoft.AspNetCore.Server.Kestrel.Internal;
 using Microsoft.AspNetCore.Server.Kestrel.Internal.Http;
 using Microsoft.AspNetCore.Server.Kestrel.Internal.Networking;
 using Microsoft.AspNetCore.Testing;
-using Microsoft.Extensions.Internal;
+using Microsoft.Extensions.Logging;
 using Xunit;
 
 namespace Microsoft.AspNetCore.Server.KestrelTests
@@ -23,16 +24,17 @@ namespace Microsoft.AspNetCore.Server.KestrelTests
         public async Task ListenerPrimarySkipsDeadDispatchPipes()
         {
             var libuv = new Libuv();
-            var primaryDispatch = new SemaphoreSlim(0, 1);
-            var secondaryDispatch = new SemaphoreSlim(0, 1);
+
+            var trace = new TestKestrelTrace();
 
             var serviceContextPrimary = new TestServiceContext
             {
+                Log = trace,
                 FrameFactory = context =>
                 {
-                    return new Frame<DefaultHttpContext>(new TestApplication(_ =>
+                    return new Frame<DefaultHttpContext>(new TestApplication(c =>
                     {
-                        primaryDispatch.Release();
+                        return c.Response.WriteAsync("Primary");
                     }), context);
                 }
             };
@@ -46,9 +48,9 @@ namespace Microsoft.AspNetCore.Server.KestrelTests
                 ThreadPool = serviceContextPrimary.ThreadPool,
                 FrameFactory = context =>
                 {
-                    return new Frame<DefaultHttpContext>(new TestApplication(_ =>
+                    return new Frame<DefaultHttpContext>(new TestApplication(c =>
                     {
-                        secondaryDispatch.Release();
+                        return c.Response.WriteAsync("Secondary"); ;
                     }), context);
                 }
             };
@@ -64,11 +66,11 @@ namespace Microsoft.AspNetCore.Server.KestrelTests
                 var listenerPrimary = new TcpListenerPrimary(serviceContextPrimary);
                 await listenerPrimary.StartAsync(pipeName, address, kestrelThreadPrimary);
 
+                Console.WriteLine(address.ToString());
+
                 // Until a secondary listener is added, connections get dispatched via the primarly listener.
-                await HttpClientSlim.GetStringAsync(address.ToString());
-                Assert.True(await primaryDispatch.WaitAsync(1000));
-                await HttpClientSlim.GetStringAsync(address.ToString());
-                Assert.True(await primaryDispatch.WaitAsync(1000));
+                Assert.Equal("Primary", await HttpClientSlim.GetStringAsync(address.ToString()));
+                Assert.Equal("Primary", await HttpClientSlim.GetStringAsync(address.ToString()));
 
                 // Add secondary listener
                 var kestrelThreadSecondary = new KestrelThread(kestrelEngine);
@@ -78,34 +80,40 @@ namespace Microsoft.AspNetCore.Server.KestrelTests
                 await listenerSecondary.StartAsync(pipeName, address, kestrelThreadSecondary);
 
                 // Once a secondary listener is added, connections start getting dispatched to it.
-                await HttpClientSlim.GetStringAsync(address.ToString());
-                Assert.True(await secondaryDispatch.WaitAsync(1000));
+                Assert.Equal("Secondary", await HttpClientSlim.GetStringAsync(address.ToString()));
 
                 // But connections will still get round-robined to the primary listener.
-                await HttpClientSlim.GetStringAsync(address.ToString());
-                Assert.True(await primaryDispatch.WaitAsync(1000));
-                await HttpClientSlim.GetStringAsync(address.ToString());
-                Assert.True(await secondaryDispatch.WaitAsync(1000));
+                Assert.Equal("Primary", await HttpClientSlim.GetStringAsync(address.ToString()));
+                Assert.Equal("Secondary", await HttpClientSlim.GetStringAsync(address.ToString()));
+                Assert.Equal("Primary", await HttpClientSlim.GetStringAsync(address.ToString()));
 
                 await listenerSecondary.DisposeAsync();
                 await kestrelThreadSecondary.StopAsync(TimeSpan.FromSeconds(1));
 
+                // The next request will fail since it failed to dispatch to the secondary listener
+                await Assert.ThrowsAsync<HttpRequestException>(() => HttpClientSlim.GetStringAsync(address.ToString()));
+                //Assert.Equal("Primary", await HttpClientSlim.GetStringAsync(address.ToString()));
+
                 // Once the secondary listener dies, it is removed from the dispatch queue.
-                await HttpClientSlim.GetStringAsync(address.ToString());
-                Assert.True(await primaryDispatch.WaitAsync(1000));
-                await HttpClientSlim.GetStringAsync(address.ToString());
-                Assert.True(await primaryDispatch.WaitAsync(1000));
+                Assert.Equal("Primary", await HttpClientSlim.GetStringAsync(address.ToString()));
+                Assert.Equal("Primary", await HttpClientSlim.GetStringAsync(address.ToString()));
+                Assert.Equal("Primary", await HttpClientSlim.GetStringAsync(address.ToString()));
 
                 await listenerPrimary.DisposeAsync();
                 await kestrelThreadPrimary.StopAsync(TimeSpan.FromSeconds(1));
             }
+
+            Assert.Equal(1, trace.TestLogger.TotalErrorsLogged);
+            var writeException = trace.TestLogger.Messages.First(m => m.LogLevel == LogLevel.Error).Exception;
+            Assert.IsType<UvException>(writeException);
+            Assert.Contains("EPIPE", writeException.Message);
         }
 
         private class TestApplication : IHttpApplication<DefaultHttpContext>
         {
-            private readonly Action<DefaultHttpContext> _app;
+            private readonly Func<DefaultHttpContext, Task> _app;
 
-            public TestApplication(Action<DefaultHttpContext> app)
+            public TestApplication(Func<DefaultHttpContext, Task> app)
             {
                 _app = app;
             }
@@ -117,8 +125,7 @@ namespace Microsoft.AspNetCore.Server.KestrelTests
 
             public Task ProcessRequestAsync(DefaultHttpContext context)
             {
-                _app(context);
-                return TaskCache.CompletedTask;
+                return _app(context);
             }
 
             public void DisposeContext(DefaultHttpContext context, Exception exception)

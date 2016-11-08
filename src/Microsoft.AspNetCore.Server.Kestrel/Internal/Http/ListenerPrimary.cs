@@ -21,6 +21,7 @@ namespace Microsoft.AspNetCore.Server.Kestrel.Internal.Http
         private int _dispatchIndex;
         private string _pipeName;
         private IntPtr _fileCompletionInfoPtr;
+        private IntPtr _reattachFileCompletionInfoPtr;
         private bool _tryDetachFromIOCP = PlatformApis.IsWindows;
 
         // this message is passed to write2 because it must be non-zero-length,
@@ -49,6 +50,11 @@ namespace Microsoft.AspNetCore.Server.Kestrel.Internal.Http
                 var fileCompletionInfo = new FILE_COMPLETION_INFORMATION() {Key = IntPtr.Zero, Port = IntPtr.Zero};
                 _fileCompletionInfoPtr = Marshal.AllocHGlobal(Marshal.SizeOf(fileCompletionInfo));
                 Marshal.StructureToPtr(fileCompletionInfo, _fileCompletionInfoPtr, false);
+            }
+
+            if (_reattachFileCompletionInfoPtr == IntPtr.Zero)
+            {
+                _reattachFileCompletionInfoPtr = Marshal.AllocHGlobal(Marshal.SizeOf<FILE_COMPLETION_INFORMATION>());
             }
 
             await StartAsync(address, thread).ConfigureAwait(false);
@@ -95,7 +101,7 @@ namespace Microsoft.AspNetCore.Server.Kestrel.Internal.Http
 
         protected override void DispatchConnection(UvStreamHandle socket)
         {
-            var index = _dispatchIndex++%(_dispatchPipes.Count + 1);
+            var index = _dispatchIndex++ % (_dispatchPipes.Count + 1);
             if (index == _dispatchPipes.Count)
             {
                 Console.WriteLine("Dispatching to Primary");
@@ -107,32 +113,38 @@ namespace Microsoft.AspNetCore.Server.Kestrel.Internal.Http
                 var write = new UvWriteReq(Log);
                 write.Init(Thread.Loop);
 
-                try
-                {
-                    // Verify pipe is open
-                    write.Write(dispatchPipe, _dummyIter, _dummyIter, 1,
-                        (write2, status, ex, state) => { }, null);
-                }
-                catch (UvException ex)
-                {
-                    write.Dispose();
+                //try
+                //{
+                //    // Verify pipe is open
+                //    write.Write(dispatchPipe, _dummyIter, _dummyIter, 1,
+                //        (write2, status, ex, state) =>
+                //        {
+                //            write2.Dispose();
+                //        }, null);
+                //}
+                //catch (UvException ex)
+                //{
+                //    write.Dispose();
 
-                    // Assume the pipe is dead, so remove the pipe from _dispatchPipes.
-                    // Even if all named pipes are removed, ListenerPrimary will still dispatch to itself.
-                    Log.LogError(0, ex, "ListenerPrimary.DispatchConnection failed. Removing pipe connection.");
-                    dispatchPipe.Dispose();
-                    _dispatchPipes.Remove(dispatchPipe);
+                //    // Assume the pipe is dead, so remove the pipe from _dispatchPipes.
+                //    // Even if all named pipes are removed, ListenerPrimary will still dispatch to itself.
+                //    Log.LogError(0, ex, "ListenerPrimary.DispatchConnection failed. Removing pipe connection.");
+                //    dispatchPipe.Dispose();
+                //    _dispatchPipes.Remove(dispatchPipe);
 
-                    Console.WriteLine("continue;");
-                    // Try to dispatch connection again
-                    DispatchConnection(socket);
-                    return;
-                }
+                //    Console.WriteLine("continue;");
+                //    // Try to dispatch connection again
+                //    DispatchConnection(socket);
+                //    return;
+                //}
+
+                //write = new UvWriteReq(Log);
+                //write.Init(Thread.Loop);
 
                 try
                 {
                     Console.WriteLine("Detaching from IOCP");
-                    DetachFromIOCP(socket);
+                    //DetachFromIOCP(socket);
 
                     write.Write2(
                         dispatchPipe,
@@ -147,9 +159,26 @@ namespace Microsoft.AspNetCore.Server.Kestrel.Internal.Http
                 }
                 catch (UvException ex)
                 {
-                    Log.LogError(0, ex, "ListenerPrimary.DispatchConnection failed.");
                     write.Dispose();
-                    throw;
+
+                    // Assume the pipe is dead, so remove the pipe from _dispatchPipes.
+                    // Even if all named pipes are removed, ListenerPrimary will still dispatch to itself.
+                    Log.LogError(0, ex, "ListenerPrimary.DispatchConnection failed. Removing pipe connection.");
+                    dispatchPipe.Dispose();
+                    _dispatchPipes.Remove(dispatchPipe);
+
+                    //ReattachToIOCP(socket);
+                    //new Connection(this, socket).Start();
+                    //socket.Dispose();
+
+                    // We'd rather not send a FIN, but the socket will remain idle if we just call uv_close.
+                    var shutdownReq = new UvShutdownReq(Log);
+                    shutdownReq.Init(Thread.Loop);
+                    shutdownReq.Shutdown(socket, (req, status, socket2) =>
+                    {
+                        req.Dispose();
+                        ((UvStreamHandle)socket2).Dispose();
+                    }, socket);
                 }
             }
         }
@@ -170,12 +199,46 @@ namespace Microsoft.AspNetCore.Server.Kestrel.Internal.Http
             var socket = IntPtr.Zero;
             Thread.Loop.Libuv.uv_fileno(handle, ref socket);
 
-            if (NtSetInformationFile(socket, out statusBlock, _fileCompletionInfoPtr,
-                (uint)Marshal.SizeOf<FILE_COMPLETION_INFORMATION>(), FileReplaceCompletionInformation) == STATUS_INVALID_INFO_CLASS)
+            var status = NtSetInformationFile(socket, out statusBlock, _fileCompletionInfoPtr,
+                (uint) Marshal.SizeOf<FILE_COMPLETION_INFORMATION>(), FileReplaceCompletionInformation);
+
+            if (status == STATUS_INVALID_INFO_CLASS)
             {
                 // Replacing IOCP information is only supported on Windows 8.1 or newer
                 _tryDetachFromIOCP = false;
             }
+
+            Console.WriteLine("DettachToIOCP status: {0}", status);
+        }
+
+        private void ReattachToIOCP(UvHandle handle)
+        {
+            if (!_tryDetachFromIOCP)
+            {
+                return;
+            }
+
+            // https://msdn.microsoft.com/en-us/library/windows/hardware/ff728840(v=vs.85).aspx
+            //const int FileReplaceCompletionInformation = 61;
+            // https://msdn.microsoft.com/en-us/library/cc704588.aspx
+
+            //var statusBlock = new IO_STATUS_BLOCK();
+            var socket = IntPtr.Zero;
+            Thread.Loop.Libuv.uv_fileno(handle, ref socket);
+
+            //var fileCompletionInfo = new FILE_COMPLETION_INFORMATION() { Port = Marshal.PtrToStructure<IntPtr>(Thread.Loop.InternalGetHandle() + 56), Key = socket };
+
+            //Console.WriteLine("FILE_COMPLETION_INFORMATION(Port = {0}, Key = {1})", fileCompletionInfo.Port, fileCompletionInfo.Key);
+
+            var status = CreateIoCompletionPort(socket,
+                Marshal.PtrToStructure<IntPtr>(Thread.Loop.InternalGetHandle() + 56), (UIntPtr)socket.ToInt64(), 0);
+
+            //Marshal.StructureToPtr(fileCompletionInfo, _reattachFileCompletionInfoPtr, false);
+
+            //var status = NtSetInformationFile(socket, out statusBlock, _fileCompletionInfoPtr,
+            //    (uint) Marshal.SizeOf<FILE_COMPLETION_INFORMATION>(), FileReplaceCompletionInformation);
+
+            Console.WriteLine("ReattachToIOCP status: {0}", status);
         }
 
         private struct IO_STATUS_BLOCK
@@ -195,6 +258,11 @@ namespace Microsoft.AspNetCore.Server.Kestrel.Internal.Http
                 out IO_STATUS_BLOCK IoStatusBlock, IntPtr FileInformation, uint Length,
                 int FileInformationClass);
 
+        [DllImport("Kernel32.dll")]
+        private static extern IntPtr CreateIoCompletionPort(IntPtr FileHandle,
+           IntPtr ExistingCompletionPort, UIntPtr CompletionKey,
+           uint NumberOfConcurrentThreads);
+
         public override async Task DisposeAsync()
         {
             // Call base first so the ListenSocket gets closed and doesn't
@@ -205,6 +273,12 @@ namespace Microsoft.AspNetCore.Server.Kestrel.Internal.Http
             {
                 Marshal.FreeHGlobal(_fileCompletionInfoPtr);
                 _fileCompletionInfoPtr = IntPtr.Zero;
+            }
+
+            if (_reattachFileCompletionInfoPtr != IntPtr.Zero)
+            {
+                Marshal.FreeHGlobal(_reattachFileCompletionInfoPtr);
+                _reattachFileCompletionInfoPtr = IntPtr.Zero;
             }
 
             if (Thread.FatalError == null && ListenPipe != null)

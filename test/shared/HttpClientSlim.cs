@@ -63,6 +63,11 @@ namespace Microsoft.AspNetCore.Testing
             {
                 var response = await reader.ReadToEndAsync();
 
+                if (string.IsNullOrEmpty(response))
+                {
+                    throw new HttpRequestException("No response.");
+                }
+
                 var status = GetStatus(response);
                 new HttpResponseMessage(status).EnsureSuccessStatusCode();
 
