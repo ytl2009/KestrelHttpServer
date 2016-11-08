@@ -28,6 +28,9 @@ namespace Microsoft.AspNetCore.Server.Kestrel.Internal.Http
         private readonly ArraySegment<ArraySegment<byte>> _dummyMessage =
             new ArraySegment<ArraySegment<byte>>(new[] {new ArraySegment<byte>(new byte[] {1, 2, 3, 4})});
 
+        private MemoryPoolBlock _dummyBlock;
+        private MemoryPoolIterator _dummyIter;
+
         protected ListenerPrimary(ServiceContext serviceContext) : base(serviceContext)
         {
         }
@@ -56,6 +59,9 @@ namespace Microsoft.AspNetCore.Server.Kestrel.Internal.Http
 
         private void PostCallback()
         {
+            _dummyBlock = Thread.Memory.Lease();
+            _dummyIter = new MemoryPoolIterator(_dummyBlock);
+
             ListenPipe = new UvPipeHandle(Log);
             ListenPipe.Init(Thread.Loop, Thread.QueueCloseHandle, false);
             ListenPipe.Bind(_pipeName);
@@ -101,27 +107,27 @@ namespace Microsoft.AspNetCore.Server.Kestrel.Internal.Http
                 var write = new UvWriteReq(Log);
                 write.Init(Thread.Loop);
 
-                //try
-                //{
-                //    // Verify pipe is open
-                //    write.Write(dispatchPipe, default(MemoryPoolIterator), default(MemoryPoolIterator), 0,
-                //        (write2, status, ex, state) => { }, null);
-                //}
-                //catch (Exception ex)
-                //{
-                //    write.Dispose();
+                try
+                {
+                    // Verify pipe is open
+                    write.Write(dispatchPipe, _dummyIter, _dummyIter, 1,
+                        (write2, status, ex, state) => { }, null);
+                }
+                catch (UvException ex)
+                {
+                    write.Dispose();
 
-                //    // Assume the pipe is dead, so remove the pipe from _dispatchPipes.
-                //    // Even if all named pipes are removed, ListenerPrimary will still dispatch to itself.
-                //    Log.LogError(0, ex, "ListenerPrimary.DispatchConnection failed. Removing pipe connection.");
-                //    dispatchPipe.Dispose();
-                //    _dispatchPipes.Remove(dispatchPipe);
+                    // Assume the pipe is dead, so remove the pipe from _dispatchPipes.
+                    // Even if all named pipes are removed, ListenerPrimary will still dispatch to itself.
+                    Log.LogError(0, ex, "ListenerPrimary.DispatchConnection failed. Removing pipe connection.");
+                    dispatchPipe.Dispose();
+                    _dispatchPipes.Remove(dispatchPipe);
 
-                //    Console.WriteLine("continue;");
-                //    // Try to dispatch connection again
-                //    DispatchConnection(socket);
-                //    return;
-                //}
+                    Console.WriteLine("continue;");
+                    // Try to dispatch connection again
+                    DispatchConnection(socket);
+                    return;
+                }
 
                 try
                 {
@@ -215,6 +221,8 @@ namespace Microsoft.AspNetCore.Server.Kestrel.Internal.Http
                         Console.WriteLine("ListnerPrimary.Dispose dispatchPipe");
                         dispatchPipe.Dispose();
                     }
+
+                    Thread.Memory.Return(_dummyBlock);
                 }, this).ConfigureAwait(false);
             }
         }
