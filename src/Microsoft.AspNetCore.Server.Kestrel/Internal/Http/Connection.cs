@@ -85,6 +85,7 @@ namespace Microsoft.AspNetCore.Server.Kestrel.Internal.Http
         public void Start()
         {
             Log.ConnectionStart(ConnectionId);
+            KestrelEventSource.Log.ConnectionStart(this);
 
             // Start socket prior to applying the ConnectionFilter
             _socket.ReadStart(_allocCallback, _readCallback, this);
