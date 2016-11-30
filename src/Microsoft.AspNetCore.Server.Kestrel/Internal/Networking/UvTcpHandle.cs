@@ -26,6 +26,13 @@ namespace Microsoft.AspNetCore.Server.Kestrel.Internal.Networking
 
         public void Bind(ServerAddress address)
         {
+            if (address.IsSocketDescriptor)
+            {
+                // Open an already-created socket descriptor.
+                _uv.tcp_open(this, address.SocketDescriptor);
+                return;
+            }
+
             var endpoint = CreateIPEndpoint(address);
 
             SockAddr addr;

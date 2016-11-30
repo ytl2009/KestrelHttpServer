@@ -117,7 +117,10 @@ namespace Microsoft.AspNetCore.Server.Kestrel
                 if (Options.ServerAddresses.Any())
                 {
                     _serverAddresses.Addresses.Clear();
-                    _serverAddresses.Addresses.Add(Options.ServerAddresses);
+                    foreach (var address in Options.ServerAddresses)
+                    {
+                        _serverAddresses.Addresses.Add(address);
+                    }
                 }
 
                 foreach (var address in _serverAddresses.Addresses.ToArray())

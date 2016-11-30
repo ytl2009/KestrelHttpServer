@@ -17,7 +17,7 @@ namespace Microsoft.AspNetCore.Server.Kestrel
 
         public bool IsUnixPipe => Host.StartsWith(Constants.UnixPipeHostPrefix);
 
-        internal bool IsFileDescriptor => Host.StartsWith(Constants.FileDescriptorPrefix);
+        internal bool IsSocketDescriptor => Host.StartsWith(Constants.SocketDescriptorPrefix);
 
         public string UnixPipePath
         {
@@ -29,16 +29,16 @@ namespace Microsoft.AspNetCore.Server.Kestrel
             }
         }
 
-        internal IntPtr FileDescriptor
+        internal IntPtr SocketDescriptor 
         {
             get
             {
-                Debug.Assert(IsFileDescriptor);
+                Debug.Assert(IsSocketDescriptor);
 
-                var fdString = Host.Substring(Constants.FileDescriptorPrefix.Length - 1);
+                var fdString = Host.Substring(Constants.SocketDescriptorPrefix.Length);
                 long fd;
 
-                if (long.TryParse(fdString, NumberStyles.None, CultureInfo.InvariantCulture, out fd))
+                if (!long.TryParse(fdString, NumberStyles.None, CultureInfo.InvariantCulture, out fd))
                 {
                     throw new FormatException($"Invalid file descriptor: {fdString}");
                 }
@@ -95,18 +95,31 @@ namespace Microsoft.AspNetCore.Server.Kestrel
             }
             int schemeDelimiterEnd = schemeDelimiterStart + "://".Length;
 
-            var isUnixPipe = url.IndexOf(Constants.UnixPipeHostPrefix, schemeDelimiterEnd, StringComparison.Ordinal) == schemeDelimiterEnd;
+            string hostPrefix = null;
+
+            if (url.IndexOf(Constants.UnixPipeHostPrefix, schemeDelimiterEnd, StringComparison.Ordinal) == schemeDelimiterEnd)
+            {
+                hostPrefix = Constants.UnixPipeHostPrefix;
+            }
+            else if (url.IndexOf(Constants.PipeDescriptorPrefix, schemeDelimiterEnd, StringComparison.Ordinal) == schemeDelimiterEnd)
+            {
+                hostPrefix = Constants.PipeDescriptorPrefix;
+            }
+            else if (url.IndexOf(Constants.SocketDescriptorPrefix, schemeDelimiterEnd, StringComparison.Ordinal) == schemeDelimiterEnd)
+            {
+                hostPrefix = Constants.SocketDescriptorPrefix;
+            }
 
             int pathDelimiterStart;
             int pathDelimiterEnd;
-            if (!isUnixPipe)
+            if (hostPrefix == null)
             {
                 pathDelimiterStart = url.IndexOf("/", schemeDelimiterEnd, StringComparison.Ordinal);
                 pathDelimiterEnd = pathDelimiterStart;
             }
             else
             {
-                pathDelimiterStart = url.IndexOf(":", schemeDelimiterEnd + Constants.UnixPipeHostPrefix.Length, StringComparison.Ordinal);
+                pathDelimiterStart = url.IndexOf(":", schemeDelimiterEnd + hostPrefix.Length, StringComparison.Ordinal);
                 pathDelimiterEnd = pathDelimiterStart + ":".Length;
             }
 
@@ -119,7 +132,7 @@ namespace Microsoft.AspNetCore.Server.Kestrel
             serverAddress.Scheme = url.Substring(0, schemeDelimiterStart);
 
             var hasSpecifiedPort = false;
-            if (!isUnixPipe)
+            if (hostPrefix == null)
             {
                 int portDelimiterStart = url.LastIndexOf(":", pathDelimiterStart - 1, pathDelimiterStart - schemeDelimiterEnd, StringComparison.Ordinal);
                 if (portDelimiterStart >= 0)

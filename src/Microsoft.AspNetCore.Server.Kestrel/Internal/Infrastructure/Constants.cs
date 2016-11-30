@@ -25,9 +25,9 @@ namespace Microsoft.AspNetCore.Server.Kestrel.Internal.Infrastructure
         public const string PipeDescriptorPrefix = "pipefd:";
 
         /// <summary>
-        /// Prefix of host name used to specify pipe file descriptor in the configuration.
+        /// Prefix of host name used to specify socket descriptor in the configuration.
         /// </summary>
-        public const string SocketDescriptorPrefix = "socketfd:";
+        public const string SocketDescriptorPrefix = "sockfd:";
 
         public const string ServerName = "Kestrel";
 

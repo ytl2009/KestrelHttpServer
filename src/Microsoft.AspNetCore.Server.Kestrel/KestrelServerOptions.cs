@@ -17,7 +17,7 @@ namespace Microsoft.AspNetCore.Server.Kestrel
     public class KestrelServerOptions
     {
         private List<ListenDescriptor> Endpoints { get; } = new List<ListenDescriptor>();
-        internal string ServerAddresses => Endpoints.Select(e => e.ToServerAddress());
+        internal IEnumerable<string> ServerAddresses => Endpoints.Select(e => e.ToServerAddress());
 
         /// <summary>
         /// Gets or sets whether the <c>Server</c> header should be included in each response.

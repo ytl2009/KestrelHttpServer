@@ -2,6 +2,7 @@
 // Licensed under the Apache License, Version 2.0. See License.txt in the project root for license information.
 
 using System;
+using System.Diagnostics;
 using System.IO;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Hosting;
@@ -33,18 +34,26 @@ namespace SampleApp
 
         public static void Main(string[] args)
         {
-            var host = new WebHostBuilder()
-                .UseKestrel(options =>
-                {
-                    // options.ThreadCount = 4;
-                    options.NoDelay = true;
-                    options.UseHttps("testCert.pfx", "testPassword");
-                    options.UseConnectionLogging();
-                })
-                .UseUrls("http://localhost:5000", "https://localhost:5001")
-                .UseContentRoot(Directory.GetCurrentDirectory())
-                .UseStartup<Startup>()
-                .Build();
+            var hostBuilder = new WebHostBuilder().UseKestrel(options =>
+            {
+                // options.ThreadCount = 4;
+                options.NoDelay = true;
+                options.UseHttps("testCert.pfx", "testPassword");
+                options.UseConnectionLogging();
+            })
+            .UseContentRoot(Directory.GetCurrentDirectory())
+            .UseStartup<Startup>();
+
+            if (Process.GetCurrentProcess().Id.ToString() == Environment.GetEnvironmentVariable("LISTEN_PID"))
+            {
+                hostBuilder.UseUrls("http://sockfd:3");
+            }
+            else
+            {
+                hostBuilder.UseUrls("http://localhost:5000", "https://localhost:5001");
+            }
+
+            var host = hostBuilder.Build();
 
             // The following section should be used to demo sockets
             //var addresses = application.GetAddresses();
