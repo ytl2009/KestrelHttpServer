@@ -28,6 +28,7 @@ namespace Microsoft.AspNetCore.Server.Kestrel.Internal.Http
         private const byte ByteCR = (byte)'\r';
         private const byte ByteLF = (byte)'\n';
         private const byte ByteColon = (byte)':';
+        private const byte ByteForwardSlash = (byte)'/';
         private const byte ByteSpace = (byte)' ';
         private const byte ByteTab = (byte)'\t';
         private const byte ByteQuestionMark = (byte)'?';
@@ -949,6 +950,8 @@ namespace Microsoft.AspNetCore.Server.Kestrel.Internal.Http
 
         public RequestLineStatus TakeStartLine(SocketInput input)
         {
+            // expected start line format: https://tools.ietf.org/html/rfc7230#section-3.1.1
+
             const int MaxInvalidRequestLineChars = 32;
 
             var scan = input.ConsumingStart();
@@ -987,6 +990,7 @@ namespace Microsoft.AspNetCore.Server.Kestrel.Internal.Http
                 }
                 end.Take();
 
+                // begin consuming method
                 string method;
                 var begin = scan;
                 if (!begin.GetKnownMethod(out method))
@@ -1021,8 +1025,38 @@ namespace Microsoft.AspNetCore.Server.Kestrel.Internal.Http
                     scan.Skip(method.Length);
                 }
 
-                scan.Take();
+                scan.Take(); // consume space
+
+                // begin consuming request-target
                 begin = scan;
+
+                string requestUriScheme;
+                string requestAuthority = null;
+                if (scan.GetKnownUriScheme(out requestUriScheme))
+                {
+                    // Request URIs can be in absolute form
+                    // See https://tools.ietf.org/html/rfc7230#section-5.3.2
+                    // This will skip over scheme and authority for determinie path, but preserving the vlues for rawTarget.
+                    // We rely on the Host header and server configuration to determine the effective host, port, and scheme
+                    // for this request.
+                    scan.Skip(requestUriScheme.Length);
+                    begin = scan;
+
+                    // an absolute URI is not required to end in a slash but must not be empty
+                    // see https://tools.ietf.org/html/rfc3986#section-4.3
+
+                    var pathIndex = scan.Seek(ByteForwardSlash, ByteSpace, ref end);
+                    if (pathIndex == -1)
+                    {
+                        RejectRequest(RequestRejectionReason.InvalidRequestLine,
+                            Log.IsEnabled(LogLevel.Information) ? start.GetAsciiStringEscaped(end, MaxInvalidRequestLineChars) : string.Empty);
+                    }
+
+                    // TODO consider handling unicode host names
+                    requestAuthority = begin.GetAsciiString(ref scan);
+                    begin = scan;
+                }
+
                 var needDecode = false;
                 var chFound = scan.Seek(ByteSpace, ByteQuestionMark, BytePercentage, ref end);
                 if (chFound == -1)
@@ -1058,13 +1092,15 @@ namespace Microsoft.AspNetCore.Server.Kestrel.Internal.Http
 
                 var queryEnd = scan;
 
-                if (pathBegin.Peek() == ByteSpace)
+                if (pathBegin.Peek() == ByteSpace && requestAuthority == null)
                 {
                     RejectRequest(RequestRejectionReason.InvalidRequestLine,
                         Log.IsEnabled(LogLevel.Information) ? start.GetAsciiStringEscaped(end, MaxInvalidRequestLineChars) : string.Empty);
                 }
 
-                scan.Take();
+                scan.Take(); // consume space
+
+                // begin consuming HTTP-version
                 begin = scan;
                 if (scan.Seek(ByteCR, ref end) == -1)
                 {
@@ -1099,11 +1135,11 @@ namespace Microsoft.AspNetCore.Server.Kestrel.Internal.Http
                 // Multibyte Internationalized Resource Identifiers (IRIs) are first converted to utf8;
                 // then encoded/escaped to ASCII  https://www.ietf.org/rfc/rfc3987.txt "Mapping of IRIs to URIs"
                 string requestUrlPath;
-                string rawTarget;
+                string rawUrlPath;
                 if (needDecode)
                 {
                     // Read raw target before mutating memory.
-                    rawTarget = pathBegin.GetAsciiString(ref queryEnd);
+                    rawUrlPath = pathBegin.GetAsciiString(ref queryEnd);
 
                     // URI was encoded, unescape and then parse as utf8
                     pathEnd = UrlPathDecoder.Unescape(pathBegin, pathEnd);
@@ -1118,31 +1154,33 @@ namespace Microsoft.AspNetCore.Server.Kestrel.Internal.Http
                     {
                         // No need to allocate an extra string if the path didn't need
                         // decoding and there's no query string following it.
-                        rawTarget = requestUrlPath;
+                        rawUrlPath = requestUrlPath;
                     }
                     else
                     {
-                        rawTarget = pathBegin.GetAsciiString(ref queryEnd);
+                        rawUrlPath = pathBegin.GetAsciiString(ref queryEnd);
                     }
                 }
 
-                var normalizedTarget = PathNormalizer.RemoveDotSegments(requestUrlPath);
+                var normalizedUrlPath = requestUrlPath == null
+                    ? string.Empty
+                    : PathNormalizer.RemoveDotSegments(requestUrlPath);
 
                 consumed = scan;
                 Method = method;
                 QueryString = queryString;
-                RawTarget = rawTarget;
+                RawTarget = requestUriScheme + requestAuthority + rawUrlPath;
                 HttpVersion = httpVersion;
 
                 bool caseMatches;
-                if (RequestUrlStartsWithPathBase(normalizedTarget, out caseMatches))
+                if (RequestUrlStartsWithPathBase(normalizedUrlPath, out caseMatches))
                 {
-                    PathBase = caseMatches ? _pathBase : normalizedTarget.Substring(0, _pathBase.Length);
-                    Path = normalizedTarget.Substring(_pathBase.Length);
+                    PathBase = caseMatches ? _pathBase : normalizedUrlPath.Substring(0, _pathBase.Length);
+                    Path = normalizedUrlPath.Substring(_pathBase.Length);
                 }
-                else if (rawTarget[0] == '/') // check rawTarget since normalizedTarget can be "" or "/" after dot segment removal
+                else if (rawUrlPath?.Length > 0 && rawUrlPath[0] == '/') // check rawUrlPath since normalizedUrlPath can be "" or "/" after dot segment removal
                 {
-                    Path = normalizedTarget;
+                    Path = normalizedUrlPath;
                 }
                 else
                 {
