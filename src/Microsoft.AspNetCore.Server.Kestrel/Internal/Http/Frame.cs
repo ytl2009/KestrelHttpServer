@@ -1054,29 +1054,40 @@ namespace Microsoft.AspNetCore.Server.Kestrel.Internal.Http
                 // begin consuming request-target
                 begin = scan;
 
+                var targetIsAbsolute = false;
                 string requestUriScheme;
                 string requestAuthority = null;
-                if (scan.GetKnownUriScheme(out requestUriScheme))
+                if (scan.GetKnownHttpSchema(out requestUriScheme))
                 {
-                    // Request URIs can be in absolute form
-                    // See https://tools.ietf.org/html/rfc7230#section-5.3.2
-                    // This will skip over scheme and authority for determinie path, but preserving the vlues for rawTarget.
-                    // We rely on the Host header and server configuration to determine the effective host, port, and scheme
+                    // Start-line can contain uri in absolute form. e.g. 'GET http://contoso.com/favicon.ico HTTP/1.1'
+                    // Clients should only send this to proxies, but the spec requires we handle it anyways.
+                    // cref https://tools.ietf.org/html/rfc7230#section-5.3
+
+                    // This will skip over scheme and authority so they do not end up in .Path,
+                    // but preserving the values for rawTarget. We rely on the Host header and 
+                    // server configuration to determine the effective host, port, and 
                     // for this request.
+
+                    targetIsAbsolute = true;
                     scan.Skip(requestUriScheme.Length);
                     begin = scan;
 
-                    // an absolute URI is not required to end in a slash but must not be empty
-                    // see https://tools.ietf.org/html/rfc3986#section-4.3
+                    var chNext = scan.Peek();
+                    if (chNext == ByteForwardSlash || chNext == ByteSpace)
+                    {
+                        // an absolute URI is not required to end in a slash but host must not be empty
+                        // see https://tools.ietf.org/html/rfc3986#section-4.3
+                        RejectRequest(RequestRejectionReason.InvalidRequestLine,
+                           Log.IsEnabled(LogLevel.Information) ? start.GetAsciiStringEscaped(end, MaxInvalidRequestLineChars) : string.Empty);
+                    }
 
-                    var pathIndex = scan.Seek(ByteForwardSlash, ByteSpace, ref end);
-                    if (pathIndex == -1)
+                    if (scan.Seek(ByteForwardSlash, ByteSpace, ref end) == -1)
                     {
                         RejectRequest(RequestRejectionReason.InvalidRequestLine,
                             Log.IsEnabled(LogLevel.Information) ? start.GetAsciiStringEscaped(end, MaxInvalidRequestLineChars) : string.Empty);
                     }
 
-                    // TODO consider handling unicode host names
+                    // TODO consider handling UTF-8 host names
                     requestAuthority = begin.GetAsciiString(ref scan);
                     begin = scan;
                 }
@@ -1116,7 +1127,7 @@ namespace Microsoft.AspNetCore.Server.Kestrel.Internal.Http
 
                 var queryEnd = scan;
 
-                if (pathBegin.Peek() == ByteSpace && requestAuthority == null)
+                if (pathBegin.Peek() == ByteSpace && !targetIsAbsolute)
                 {
                     RejectRequest(RequestRejectionReason.InvalidRequestLine,
                         Log.IsEnabled(LogLevel.Information) ? start.GetAsciiStringEscaped(end, MaxInvalidRequestLineChars) : string.Empty);
@@ -1193,7 +1204,9 @@ namespace Microsoft.AspNetCore.Server.Kestrel.Internal.Http
                 consumed = scan;
                 Method = method;
                 QueryString = queryString;
-                RawTarget = requestUriScheme + requestAuthority + rawUrlPath;
+                RawTarget = targetIsAbsolute
+                    ? requestUriScheme + requestAuthority + rawUrlPath
+                    : rawUrlPath;
                 HttpVersion = httpVersion;
 
                 bool caseMatches;

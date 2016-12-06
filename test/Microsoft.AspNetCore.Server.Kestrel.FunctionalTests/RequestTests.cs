@@ -461,59 +461,44 @@ namespace Microsoft.AspNetCore.Server.Kestrel.FunctionalTests
         [InlineData("http://localhost/", true, "/")]
         [InlineData("https://localhost/", true, "/")]
         [InlineData("http://localhost", true, "")]
+        // bad requests
         [InlineData("http://", false, null)]
         [InlineData("https://", false, null)]
+        [InlineData("http:///", false, null)]
+        [InlineData("http:////", false, null)]
         public async Task CanHandleRequestsWithUrlInAbsoluteForm(string requestUrl, bool valid, string expectedPath)
         {
             var pathTcs = new TaskCompletionSource<PathString>();
             var rawTargetTcs = new TaskCompletionSource<string>();
             var hostTcs = new TaskCompletionSource<HostString>();
 
-            var builder = new WebHostBuilder()
-                .UseKestrel()
-                .UseUrls("http://127.0.0.1:0")
-                .Configure(app =>
-                {
-                    app.Run(async context =>
-                    {
-                        pathTcs.TrySetResult(context.Request.Path);
-                        hostTcs.TrySetResult(context.Request.Host);
-                        rawTargetTcs.TrySetResult(context.Features.Get<IHttpRequestFeature>().RawTarget);
-                        await context.Response.WriteAsync("Done");
-                    });
-                });
-
-            using (var host = builder.Build())
+            using (var server = new TestServer(async context =>
+                 {
+                     pathTcs.TrySetResult(context.Request.Path);
+                     hostTcs.TrySetResult(context.Request.Host);
+                     rawTargetTcs.TrySetResult(context.Features.Get<IHttpRequestFeature>().RawTarget);
+                     await context.Response.WriteAsync("Done");
+                 }))
             {
-                host.Start();
-
-                using (var socket = new Socket(AddressFamily.InterNetwork, SocketType.Stream, ProtocolType.Tcp))
+                using (var connection = server.CreateConnection())
                 {
-                    socket.Connect(new IPEndPoint(IPAddress.Loopback, host.GetPort()));
-                    var raw = $"GET {requestUrl} HTTP/1.1\r\n" +
-                              "Content-Length: 0\r\n" +
-                              "Host: localhost\r\n" +
-                              "Connection: close\r\n" +
-                              "\r\n";
+                    await connection.SendAll(
+                       $"GET {requestUrl} HTTP/1.1",
+                        "Content-Length: 0",
+                        "Host: localhost",
+                        "",
+                        "");
 
-                    socket.Send(Encoding.ASCII.GetBytes(raw));
                     if (valid)
                     {
-                        await Task.WhenAll(pathTcs.Task, rawTargetTcs.Task, hostTcs.Task).OrTimeout(TimeSpan.FromSeconds(30));
+                        await Task.WhenAll(pathTcs.Task, rawTargetTcs.Task, hostTcs.Task).TimeoutAfter(TimeSpan.FromSeconds(30));
                         Assert.Equal(new PathString(expectedPath), pathTcs.Task.Result);
                         Assert.Equal(requestUrl, rawTargetTcs.Task.Result);
                         Assert.Equal("localhost", hostTcs.Task.Result.ToString());
                     }
                     else
                     {
-                        var response = new StringBuilder();
-                        var responseBytes = new byte[4096];
-                        var received = 0;
-                        while ((received = socket.Receive(responseBytes)) > 0)
-                        {
-                            response.Append(Encoding.ASCII.GetString(responseBytes, 0, received));
-                        }
-                        Assert.StartsWith("HTTP/1.1 400", response.ToString());
+                        await connection.Receive("HTTP/1.1 400 Bad Request");
                     }
                 }
             }
