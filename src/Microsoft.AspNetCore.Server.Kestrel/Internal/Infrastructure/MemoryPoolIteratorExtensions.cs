@@ -164,18 +164,13 @@ namespace Microsoft.AspNetCore.Server.Kestrel.Internal.Infrastructure
         }
 
         /// <summary>
-        /// Checks 8 bytes from <paramref name="begin"/> that correspond to a known URI scheme.
+        /// Checks 8 bytes from <paramref name="begin"/> that correspond to 'http://' or 'https://'
         /// </summary>
-        /// <remarks>
-        /// Currently recognizes these schemes:
-        /// - 'http://'
-        /// - 'https://'
-        /// </remarks>
         /// <param name="begin">The iterator</param>
         /// <param name="knownScheme">A reference to the known scheme, if the input matches any</param>
-        /// <returns></returns>
+        /// <returns>True when memory starts with known http or https schema</returns>
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
-        public static bool GetKnownUriScheme(this MemoryPoolIterator begin, out string knownScheme)
+        public static bool GetKnownHttpSchema(this MemoryPoolIterator begin, out string knownScheme)
         {
             knownScheme = null;
             ulong value;
