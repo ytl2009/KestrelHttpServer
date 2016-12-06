@@ -422,19 +422,14 @@ namespace Microsoft.AspNetCore.Server.Kestrel.FunctionalTests
         }
 
         [Theory]
-        [InlineData("http://localhost/abs/path", true, "/abs/path")]
-        [InlineData("https://localhost/abs/path", true, "/abs/path")] // handles mismatch scheme
-        [InlineData("https://localhost:22/abs/path", true, "/abs/path")] // handles mismatched ports
-        [InlineData("https://differenthost/abs/path", true, "/abs/path")] // handles mismatched hostname
-        [InlineData("http://localhost/", true, "/")]
-        [InlineData("https://localhost/", true, "/")]
-        [InlineData("http://localhost", true, "")]
-        // bad requests
-        [InlineData("http://", false, null)]
-        [InlineData("https://", false, null)]
-        [InlineData("http:///", false, null)]
-        [InlineData("http:////", false, null)]
-        public async Task CanHandleRequestsWithUrlInAbsoluteForm(string requestUrl, bool valid, string expectedPath)
+        [InlineData("http://localhost/abs/path", "/abs/path")]
+        [InlineData("https://localhost/abs/path", "/abs/path")] // handles mismatch scheme
+        [InlineData("https://localhost:22/abs/path", "/abs/path")] // handles mismatched ports
+        [InlineData("https://differenthost/abs/path", "/abs/path")] // handles mismatched hostname
+        [InlineData("http://localhost/", "/")]
+        [InlineData("https://localhost/", "/")]
+        [InlineData("http://localhost", "")]
+        public async Task CanHandleRequestsWithUrlInAbsoluteForm(string requestUrl, string expectedPath)
         {
             var pathTcs = new TaskCompletionSource<PathString>();
             var rawTargetTcs = new TaskCompletionSource<string>();
@@ -451,23 +446,16 @@ namespace Microsoft.AspNetCore.Server.Kestrel.FunctionalTests
                 using (var connection = server.CreateConnection())
                 {
                     await connection.SendAll(
-                       $"GET {requestUrl} HTTP/1.1",
+                        $"GET {requestUrl} HTTP/1.1",
                         "Content-Length: 0",
                         "Host: localhost",
                         "",
                         "");
 
-                    if (valid)
-                    {
-                        await Task.WhenAll(pathTcs.Task, rawTargetTcs.Task, hostTcs.Task).TimeoutAfter(TimeSpan.FromSeconds(30));
-                        Assert.Equal(new PathString(expectedPath), pathTcs.Task.Result);
-                        Assert.Equal(requestUrl, rawTargetTcs.Task.Result);
-                        Assert.Equal("localhost", hostTcs.Task.Result.ToString());
-                    }
-                    else
-                    {
-                        await connection.Receive("HTTP/1.1 400 Bad Request");
-                    }
+                    await Task.WhenAll(pathTcs.Task, rawTargetTcs.Task, hostTcs.Task).TimeoutAfter(TimeSpan.FromSeconds(30));
+                    Assert.Equal(new PathString(expectedPath), pathTcs.Task.Result);
+                    Assert.Equal(requestUrl, rawTargetTcs.Task.Result);
+                    Assert.Equal("localhost", hostTcs.Task.Result.ToString());
                 }
             }
         }

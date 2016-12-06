@@ -1048,11 +1048,11 @@ namespace Microsoft.AspNetCore.Server.Kestrel.Internal.Http
                     scan.Skip(requestUriScheme.Length);
                     begin = scan;
 
+                    // an absolute URI is not required to end in a slash but host must not be empty
+                    // see https://tools.ietf.org/html/rfc3986#section-4.3
                     var chNext = scan.Peek();
                     if (chNext == ByteForwardSlash || chNext == ByteSpace)
                     {
-                        // an absolute URI is not required to end in a slash but host must not be empty
-                        // see https://tools.ietf.org/html/rfc3986#section-4.3
                         RejectRequest(RequestRejectionReason.InvalidRequestLine,
                            Log.IsEnabled(LogLevel.Information) ? start.GetAsciiStringEscaped(end, MaxInvalidRequestLineChars) : string.Empty);
                     }
