@@ -612,7 +612,7 @@ namespace Microsoft.AspNetCore.Server.KestrelTests
         [InlineData("HtTp:// ", false, null)]
         [InlineData("https://", true, MemoryPoolIteratorExtensions.HttpsScheme)]
         [InlineData("https://abc", true, MemoryPoolIteratorExtensions.HttpsScheme)]
-        public void GetKnownHttpSchema(string input, bool expectedResult, string expectedString)
+        public void GetsKnownHttpSchema(string input, bool expectedResult, string expectedString)
         {
             // Test within one block
             var block = _pool.Lease();

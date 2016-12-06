@@ -1054,42 +1054,27 @@ namespace Microsoft.AspNetCore.Server.Kestrel.Internal.Http
                 // begin consuming request-target
                 begin = scan;
 
-                var targetIsAbsolute = false;
-                string requestUriScheme;
-                string requestAuthority = null;
-                if (scan.GetKnownHttpSchema(out requestUriScheme))
+                var targetBegin = scan;
+
+                if (targetBegin.Peek() != ByteForwardSlash)
                 {
-                    // Start-line can contain uri in absolute form. e.g. 'GET http://contoso.com/favicon.ico HTTP/1.1'
-                    // Clients should only send this to proxies, but the spec requires we handle it anyways.
-                    // cref https://tools.ietf.org/html/rfc7230#section-5.3
-
-                    // This will skip over scheme and authority so they do not end up in .Path,
-                    // but preserving the values for rawTarget. We rely on the Host header and 
-                    // server configuration to determine the effective host, port, and 
-                    // for this request.
-
-                    targetIsAbsolute = true;
-                    scan.Skip(requestUriScheme.Length);
-                    begin = scan;
-
-                    // an absolute URI is not required to end in a slash but host must not be empty
-                    // see https://tools.ietf.org/html/rfc3986#section-4.3
-                    var chNext = scan.Peek();
-                    if (chNext == ByteForwardSlash || chNext == ByteSpace)
+                    string requestUriScheme;
+                    if (scan.GetKnownHttpSchema(out requestUriScheme))
                     {
-                        RejectRequest(RequestRejectionReason.InvalidRequestLine,
-                           Log.IsEnabled(LogLevel.Information) ? start.GetAsciiStringEscaped(end, MaxInvalidRequestLineChars) : string.Empty);
-                    }
+                        // Start-line can contain uri in absolute form. e.g. 'GET http://contoso.com/favicon.ico HTTP/1.1'
+                        // Clients should only send this to proxies, but the spec requires we handle it anyways.
+                        // cref https://tools.ietf.org/html/rfc7230#section-5.3
+                        
+                        scan.Skip(requestUriScheme.Length);
 
-                    if (scan.Seek(ByteForwardSlash, ByteSpace, ref end) == -1)
-                    {
-                        RejectRequest(RequestRejectionReason.InvalidRequestLine,
-                            Log.IsEnabled(LogLevel.Information) ? start.GetAsciiStringEscaped(end, MaxInvalidRequestLineChars) : string.Empty);
+                        if (scan.Seek(ByteForwardSlash, ByteSpace, ref end) == -1)
+                        {
+                            RejectRequest(RequestRejectionReason.InvalidRequestLine,
+                               Log.IsEnabled(LogLevel.Information) ? start.GetAsciiStringEscaped(end, MaxInvalidRequestLineChars) : string.Empty);
+                        }
+                    
+                        begin = scan;
                     }
-
-                    // TODO consider handling UTF-8 host names
-                    requestAuthority = begin.GetAsciiString(ref scan);
-                    begin = scan;
                 }
 
                 var needDecode = false;
@@ -1113,7 +1098,7 @@ namespace Microsoft.AspNetCore.Server.Kestrel.Internal.Http
                 var pathBegin = begin;
                 var pathEnd = scan;
 
-                var queryString = "";
+                var queryString = string.Empty;
                 if (chFound == ByteQuestionMark)
                 {
                     begin = scan;
@@ -1127,7 +1112,7 @@ namespace Microsoft.AspNetCore.Server.Kestrel.Internal.Http
 
                 var queryEnd = scan;
 
-                if (pathBegin.Peek() == ByteSpace && !targetIsAbsolute)
+                if (pathBegin.Peek() == ByteSpace && targetBegin.Index == pathBegin.Index)
                 {
                     RejectRequest(RequestRejectionReason.InvalidRequestLine,
                         Log.IsEnabled(LogLevel.Information) ? start.GetAsciiStringEscaped(end, MaxInvalidRequestLineChars) : string.Empty);
@@ -1170,11 +1155,11 @@ namespace Microsoft.AspNetCore.Server.Kestrel.Internal.Http
                 // Multibyte Internationalized Resource Identifiers (IRIs) are first converted to utf8;
                 // then encoded/escaped to ASCII  https://www.ietf.org/rfc/rfc3987.txt "Mapping of IRIs to URIs"
                 string requestUrlPath;
-                string rawUrlPath;
+                string rawTarget;
                 if (needDecode)
                 {
                     // Read raw target before mutating memory.
-                    rawUrlPath = pathBegin.GetAsciiString(ref queryEnd);
+                    rawTarget = targetBegin.GetAsciiString(ref queryEnd);
 
                     // URI was encoded, unescape and then parse as utf8
                     pathEnd = UrlPathDecoder.Unescape(pathBegin, pathEnd);
@@ -1185,15 +1170,30 @@ namespace Microsoft.AspNetCore.Server.Kestrel.Internal.Http
                     // URI wasn't encoded, parse as ASCII
                     requestUrlPath = pathBegin.GetAsciiString(ref pathEnd);
 
-                    if (queryString.Length == 0)
+                    if (queryString.Length == 0 && targetBegin.Index == pathBegin.Index)
                     {
                         // No need to allocate an extra string if the path didn't need
-                        // decoding and there's no query string following it.
-                        rawUrlPath = requestUrlPath;
+                        // decoding and there's no query string following it, and the
+                        // request-target isn't absolute-form
+                        rawTarget = requestUrlPath;
                     }
                     else
                     {
-                        rawUrlPath = pathBegin.GetAsciiString(ref queryEnd);
+                        rawTarget = targetBegin.GetAsciiString(ref queryEnd);
+                    }
+                }
+
+                if (targetBegin.Index < pathBegin.Index)
+                {
+                    // validation of absolute-form URI may be slow, but clients
+                    // should not be sending this form anyways, so perf optimization 
+                    // not high priority
+
+                    Uri _;
+                    if (!Uri.TryCreate(rawTarget, UriKind.Absolute, out _))
+                    {
+                        RejectRequest(RequestRejectionReason.InvalidRequestLine,
+                        Log.IsEnabled(LogLevel.Information) ? start.GetAsciiStringEscaped(end, MaxInvalidRequestLineChars) : string.Empty);
                     }
                 }
 
@@ -1204,9 +1204,7 @@ namespace Microsoft.AspNetCore.Server.Kestrel.Internal.Http
                 consumed = scan;
                 Method = method;
                 QueryString = queryString;
-                RawTarget = targetIsAbsolute
-                    ? requestUriScheme + requestAuthority + rawUrlPath
-                    : rawUrlPath;
+                RawTarget = rawTarget;
                 HttpVersion = httpVersion;
 
                 bool caseMatches;
@@ -1215,7 +1213,7 @@ namespace Microsoft.AspNetCore.Server.Kestrel.Internal.Http
                     PathBase = caseMatches ? _pathBase : normalizedUrlPath.Substring(0, _pathBase.Length);
                     Path = normalizedUrlPath.Substring(_pathBase.Length);
                 }
-                else if (rawUrlPath?.Length > 0 && rawUrlPath[0] == '/') // check rawUrlPath since normalizedUrlPath can be "" or "/" after dot segment removal
+                else if (requestUrlPath?.Length > 0 && requestUrlPath[0] == '/') // check requestUrlPath since normalizedUrlPath can be "" or "/" after dot segment removal
                 {
                     Path = normalizedUrlPath;
                 }
