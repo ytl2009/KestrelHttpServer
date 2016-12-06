@@ -427,8 +427,13 @@ namespace Microsoft.AspNetCore.Server.Kestrel.FunctionalTests
         [InlineData("https://localhost:22/abs/path", "/abs/path")] // handles mismatched ports
         [InlineData("https://differenthost/abs/path", "/abs/path")] // handles mismatched hostname
         [InlineData("http://localhost/", "/")]
+        [InlineData("http://root@contoso.com/path", "/path")]
+        [InlineData("http://root:password@contoso.com/path", "/path")]
         [InlineData("https://localhost/", "/")]
         [InlineData("http://localhost", "")]
+        [InlineData("http://127.0.0.1/", "/")]
+        [InlineData("http://[::1]/", "/")]
+        [InlineData("http://[::1]:8080/", "/")]
         public async Task CanHandleRequestsWithUrlInAbsoluteForm(string requestUrl, string expectedPath)
         {
             var pathTcs = new TaskCompletionSource<PathString>();
