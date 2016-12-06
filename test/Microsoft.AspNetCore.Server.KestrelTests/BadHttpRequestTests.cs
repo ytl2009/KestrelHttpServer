@@ -52,6 +52,12 @@ namespace Microsoft.AspNetCore.Server.KestrelTests
         [InlineData("} / HTTP/1.0\r\n")]
         [InlineData("get@ / HTTP/1.0\r\n")]
         [InlineData("post= / HTTP/1.0\r\n")]
+        // malformed request target
+        [InlineData("GET http:// HTTP/1.1\r\n")]
+        [InlineData("GET https:// HTTP/1.1\r\n")]
+        [InlineData("GET http:/// HTTP/1.1\r\n")]
+        [InlineData("GET http://// HTTP/1.1\r\n")]
+        //[InlineData("GET http://:80/abc HTTP/1.1")]
         public async Task TestInvalidRequestLines(string request)
         {
             using (var server = new TestServer(context => TaskCache.CompletedTask))
