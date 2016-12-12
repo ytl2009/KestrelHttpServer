@@ -1,0 +1,54 @@
+Dockerfile:
+
+FROM microsoft/aspnetcore
+
+#RUN apt-get -o Acquire::Check-Valid-Until=false update; apt-get install -y dbus
+
+#RUN systemctl mask systemd-remount-fs.service dev-hugepages.mount sys-fs-fuse-connections.mount systemd-logind.service getty.target console-getty.service
+#RUN systemctl mask getty.target console-getty.service
+#RUN cp /lib/systemd/system/dbus.service /etc/systemd/system/; sed -i 's/OOMScoreAdjust=-900//' /etc/systemd/system/dbus.service
+
+VOLUME ["/sys/fs/cgroup"]
+ENV container=docker
+
+CMD ["/sbin/init"]
+
+###############################################################################
+
+/etc/systemd/system/hello.service:
+
+[Unit]
+Requires=hello.socket
+
+[Service]
+ExecStart=/usr/bin/dotnet SampleApp.dll
+WorkingDirectory=/publish
+NonBlocking=true
+
+###############################################################################
+
+/etc/systemd/system/hello.socket:
+
+[Unit]
+Description=Hello socket
+
+[Socket]
+ListenStream=8080
+NoDelay=true
+
+###############################################################################
+
+> docker build -f Dockerfile .
+> docker run -dt --privileged <image hash>
+> docker exec -it <container hash> /bin/bash
+
+# systemctl start hello 
+# curl localhost:8080
+hello, world
+
+###############################################################################
+
+# apt-get update
+# apt-get install -y git
+# cd /usr/src/
+# git clone https://github.com/aspnet/KestrelHttpServer.git
