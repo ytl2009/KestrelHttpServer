@@ -1,8 +1,11 @@
 #!/usr/bin/env bash
 
-dotnet restore ../../../
-dotnet publish ../../../samples/SampleApp/
-cp -R ../../../samples/SampleApp/bin/Debug/netcoreapp1.1/publish/ .
+root=../../..
+
+source $root/build.sh --quiet
+dotnet restore $root
+dotnet publish $root/samples/SampleApp/
+cp -R $root/samples/SampleApp/bin/Debug/netcoreapp1.1/publish/ .
 image=$(docker build -qf Dockerfile .)
 container=$(docker run -Ptd --privileged $image)
 
