@@ -1,12 +1,15 @@
 #!/usr/bin/env bash
 
-root=../../..
+# Ensure that dotnet is added to the PATH
+scriptDir=$(dirname "${BASH_SOURCE[0]}")
+repoDir=$(cd $scriptDir/../../.. && pwd)
+source ./.build/KoreBuild.sh -r $repoDir --quiet
 
-source $root/build.sh --quiet
-dotnet restore $root
-dotnet publish $root/samples/SampleApp/
-cp -R $root/samples/SampleApp/bin/Debug/netcoreapp1.1/publish/ .
-image=$(docker build -qf Dockerfile .)
+dotnet restore
+dotnet publish ./samples/SampleApp/
+cp -R ./samples/SampleApp/bin/Debug/netcoreapp1.1/publish/ $scriptDir
+
+image=$(docker build -qf $scriptDir/Dockerfile $scriptDir)
 container=$(docker run -Ptd --privileged $image)
 
 # Try to connect to SampleApp once a second up to 10 times.
