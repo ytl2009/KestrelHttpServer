@@ -25,6 +25,7 @@ namespace Microsoft.AspNetCore.Server.Kestrel.Internal.Http
     public abstract partial class Frame : IFrameControl
     {
         // byte types don't have a data type annotation so we pre-cast them; to avoid in-place casts
+        private const byte ByteAsterisk = (byte)'*';
         private const byte ByteCR = (byte)'\r';
         private const byte ByteLF = (byte)'\n';
         private const byte ByteColon = (byte)':';
@@ -1032,7 +1033,27 @@ namespace Microsoft.AspNetCore.Server.Kestrel.Internal.Http
 
                 var targetBegin = scan;
 
-                if (targetBegin.Peek() != ByteForwardSlash)
+                var chFirst = targetBegin.Peek();
+                // origin-form
+                if (chFirst == ByteForwardSlash)
+                {
+                    // most common case. Check first to avoid additional work.
+                }
+                // asterisk-form
+                else if (chFirst == ByteAsterisk)
+                {
+                    if(!HttpMethods.IsOptions(method))
+                    {
+                        // asterisk-form only valid for OPTIONS requests
+                        // proxies are required to convert absolute-form to asterisk-form if original
+                        // request is in absolute-form
+                        // see https://tools.ietf.org/html/rfc7230#section-5.3.4
+                        RejectRequest(RequestRejectionReason.InvalidRequestLine,
+                                   Log.IsEnabled(LogLevel.Information) ? start.GetAsciiStringEscaped(end, MaxInvalidRequestLineChars) : string.Empty);
+                    }
+                }
+                // absolute-form or authority-form
+                else
                 {
                     string requestUriScheme;
                     if (scan.GetKnownHttpSchema(out requestUriScheme))
@@ -1051,6 +1072,13 @@ namespace Microsoft.AspNetCore.Server.Kestrel.Internal.Http
                     
                         begin = scan;
                     }
+                    //else if(!HttpMethods.IsConnect(method))
+                    //{
+                    //    // fast-path to reject authority-form requests, which are only valid for CONNECT
+                    //    // see https://tools.ietf.org/html/rfc7230#section-5.3.3
+                    //    RejectRequest(RequestRejectionReason.InvalidRequestLine,
+                    //           Log.IsEnabled(LogLevel.Information) ? start.GetAsciiStringEscaped(end, MaxInvalidRequestLineChars) : string.Empty);
+                    //}
                 }
 
                 var needDecode = false;
