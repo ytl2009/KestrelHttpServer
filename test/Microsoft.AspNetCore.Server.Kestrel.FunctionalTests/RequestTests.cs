@@ -462,7 +462,7 @@ namespace Microsoft.AspNetCore.Server.Kestrel.FunctionalTests
         [InlineData("http://root@contoso.com/path", "/path")]
         [InlineData("http://root:password@contoso.com/path", "/path")]
         [InlineData("https://localhost/", "/")]
-        [InlineData("http://localhost", "")]
+        [InlineData("http://localhost", "/")]
         [InlineData("http://127.0.0.1/", "/")]
         [InlineData("http://[::1]/", "/")]
         [InlineData("http://[::1]:8080/", "/")]
