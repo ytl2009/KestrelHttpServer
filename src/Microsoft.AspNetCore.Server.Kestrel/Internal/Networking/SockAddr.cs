@@ -92,7 +92,7 @@ namespace Microsoft.AspNetCore.Server.Kestrel.Internal.Networking
                     *((long*)(b + 8)) = _field2;
                 }
 
-                return new IPEndPoint(new IPAddress(bytes), port);
+                return new IPEndPoint(new IPAddress(bytes, scopeid: _field3 & 0xFFFFFFFF), port);
             }
         }
 

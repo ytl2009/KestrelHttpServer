@@ -1,5 +1,9 @@
+// Copyright (c) .NET Foundation. All rights reserved.
+// Licensed under the Apache License, Version 2.0. See License.txt in the project root for license information.
+
 using System;
-using Microsoft.AspNetCore.Server.Kestrel.Filter;
+using System.Collections.Generic;
+using System.Net;
 
 namespace Microsoft.AspNetCore.Server.Kestrel
 {
@@ -9,6 +13,14 @@ namespace Microsoft.AspNetCore.Server.Kestrel
     public class KestrelServerOptions
     {
         /// <summary>
+        /// Configures the endpoints that Kestrel should listen to.
+        /// </summary>
+        /// <remarks>
+        /// If this list is empty, the server.urls setting (e.g. UseUrls) is used.
+        /// </remarks>
+        internal List<ListenOptions> ListenOptions { get; } = new List<ListenOptions>();
+
+        /// <summary>
         /// Gets or sets whether the <c>Server</c> header should be included in each response.
         /// </summary>
         /// <remarks>
@@ -17,21 +29,10 @@ namespace Microsoft.AspNetCore.Server.Kestrel
         public bool AddServerHeader { get; set; } = true;
 
         /// <summary>
-        /// Enables the UseKestrel options callback to resolve and use services registered by the application during startup.
+        /// Enables the Listen options callback to resolve and use services registered by the application during startup.
         /// Typically initialized by <see cref="Hosting.WebHostBuilderKestrelExtensions.UseKestrel(Hosting.IWebHostBuilder, Action{KestrelServerOptions})"/>.
         /// </summary>
         public IServiceProvider ApplicationServices { get; set; }
-
-        /// <summary>
-        /// Gets or sets an <see cref="IConnectionFilter"/> that allows each connection <see cref="System.IO.Stream"/>
-        /// to be intercepted and transformed.
-        /// Configured by the <c>UseHttps()</c> and <see cref="Hosting.KestrelServerOptionsConnectionLoggingExtensions.UseConnectionLogging(KestrelServerOptions)"/>
-        /// extension methods.
-        /// </summary>
-        /// <remarks>
-        /// Defaults to null.
-        /// </remarks>
-        public IConnectionFilter ConnectionFilter { get; set; }
 
         /// <summary>
         /// <para>
@@ -70,6 +71,7 @@ namespace Microsoft.AspNetCore.Server.Kestrel
         /// <remarks>
         /// Defaults to true.
         /// </remarks>
+        [Obsolete("This property is obsolete and will be removed in a future version. Use ListenOptions.NoDelay instead.")]
         public bool NoDelay { get; set; } = true;
 
         /// <summary>
@@ -114,6 +116,116 @@ namespace Microsoft.AspNetCore.Server.Kestrel
 
                 return threadCount;
             }
+        }
+
+        /// <summary>
+        /// Bind to given IP address and port.
+        /// </summary>
+        public void Listen(IPAddress address, int port)
+        {
+            Listen(address, port, _ => { });
+        }
+
+        /// <summary>
+        /// Bind to given IP address and port.
+        /// The callback configures endpoint-specific settings.
+        /// </summary>
+        public void Listen(IPAddress address, int port, Action<ListenOptions> configure)
+        {
+            if (address == null)
+            {
+                throw new ArgumentNullException(nameof(address));
+            }
+
+            Listen(new IPEndPoint(address, port), configure);
+        }
+
+        /// <summary>
+        /// Bind to given IP endpoint.
+        /// </summary>
+        public void Listen(IPEndPoint endPoint)
+        {
+            Listen(endPoint, _ => { });
+        }
+
+        /// <summary>
+        /// Bind to given IP address and port.
+        /// The callback configures endpoint-specific settings.
+        /// </summary>
+        public void Listen(IPEndPoint endPoint, Action<ListenOptions> configure)
+        {
+            if (endPoint == null)
+            {
+                throw new ArgumentNullException(nameof(endPoint));
+            }
+            if (configure == null)
+            {
+                throw new ArgumentNullException(nameof(configure));
+            }
+
+            var listenOptions = new ListenOptions(endPoint) { KestrelServerOptions = this };
+            configure(listenOptions);
+            ListenOptions.Add(listenOptions);
+        }
+
+        /// <summary>
+        /// Bind to given Unix domain socket path.
+        /// </summary>
+        public void ListenUnixSocket(string socketPath)
+        {
+            ListenUnixSocket(socketPath, _ => { });
+        }
+
+        /// <summary>
+        /// Bind to given Unix domain socket path.
+        /// Specify callback to configure endpoint-specific settings.
+        /// </summary>
+        public void ListenUnixSocket(string socketPath, Action<ListenOptions> configure)
+        {
+            if (socketPath == null)
+            {
+                throw new ArgumentNullException(nameof(socketPath));
+            }
+            if (socketPath.Length == 0 || socketPath[0] != '/')
+            {
+                throw new ArgumentException("Unix socket path must be absolute.", nameof(socketPath));
+            }
+            if (configure == null)
+            {
+                throw new ArgumentNullException(nameof(configure));
+            }
+
+            var listenOptions = new ListenOptions(socketPath) { KestrelServerOptions = this };
+            configure(listenOptions);
+            ListenOptions.Add(listenOptions);
+        }
+
+        /// <summary>
+        /// Open a socket file descriptor.
+        /// </summary>
+        public void ListenHandle(long handle)
+        {
+            ListenHandle(handle, _ => { });
+        }
+
+        /// <summary>
+        /// Open a socket file descriptor.
+        /// The callback configures endpoint-specific settings.
+        /// </summary>
+        public void ListenHandle(long handle, Action<ListenOptions> configure)
+        {
+            if (handle < 0)
+            {
+                throw new ArgumentOutOfRangeException(nameof(handle));
+            }
+            if (configure == null)
+            {
+                throw new ArgumentNullException(nameof(configure));
+            }
+
+            var listenOptions = new ListenOptions(handle) { KestrelServerOptions = this };
+            configure(listenOptions);
+            ListenOptions.Add(listenOptions);
         }
     }
 }

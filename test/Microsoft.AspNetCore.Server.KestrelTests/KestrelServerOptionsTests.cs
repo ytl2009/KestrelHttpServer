@@ -3,13 +3,14 @@
 
 using System;
 using System.Linq;
+using System.Net;
 using System.Reflection;
 using Microsoft.AspNetCore.Server.Kestrel;
 using Xunit;
 
 namespace Microsoft.AspNetCore.Server.KestrelTests
 {
-    public class KestrelServerInformationTests
+    public class KestrelServerOptionsTests
     {
 #pragma warning disable CS0618
         [Fact]
@@ -36,6 +37,43 @@ namespace Microsoft.AspNetCore.Server.KestrelTests
             var o = new KestrelServerOptions();
             o.MaxRequestBufferSize = 42;
             Assert.Equal(42, o.Limits.MaxRequestBufferSize);
+        }
+
+        [Fact]
+        public void NoDelayIsMarkedObsolete()
+        {
+            Assert.NotNull(typeof(KestrelServerOptions)
+                .GetProperty(nameof(KestrelServerOptions.NoDelay))
+                .GetCustomAttributes(false)
+                .OfType<ObsoleteAttribute>()
+                .SingleOrDefault());
+        }
+
+        [Fact]
+        public void NoDelayPropogatesToListenOptions()
+        {
+            var o1 = new KestrelServerOptions();
+            o1.Listen(IPAddress.Loopback, 0);
+            o1.Listen(IPAddress.Loopback, 0, d =>
+            {
+                d.NoDelay = false;
+            });
+
+            var o2 = new KestrelServerOptions
+            {
+                NoDelay = false
+            };
+            o2.Listen(IPAddress.Loopback, 0);
+            o2.Listen(IPAddress.Loopback, 0, d =>
+            {
+                d.NoDelay = true;
+                Assert.False(d.NoDelay);
+            });
+
+            Assert.True(o1.ListenOptions[0].NoDelay);
+            Assert.False(o1.ListenOptions[1].NoDelay);
+            Assert.False(o2.ListenOptions[0].NoDelay);
+            Assert.False(o2.ListenOptions[1].NoDelay);
         }
 #pragma warning restore CS0612
 

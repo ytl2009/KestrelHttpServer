@@ -87,7 +87,7 @@ namespace Microsoft.AspNetCore.Server.Kestrel.Internal.Http
 
             ServerOptions = context.ListenerContext.ServiceContext.ServerOptions;
 
-            _pathBase = ServerAddress.PathBase;
+            _pathBase = context.ListenerContext.ListenOptions.PathBase;
 
             FrameControl = this;
             _keepAliveMilliseconds = (long)ServerOptions.Limits.KeepAliveTimeout.TotalMilliseconds;
@@ -113,7 +113,6 @@ namespace Microsoft.AspNetCore.Server.Kestrel.Internal.Http
         protected IKestrelTrace Log => ConnectionContext.ListenerContext.ServiceContext.Log;
 
         private DateHeaderValueManager DateHeaderValueManager => ConnectionContext.ListenerContext.ServiceContext.DateHeaderValueManager;
-        private ServerAddress ServerAddress => ConnectionContext.ListenerContext.ServerAddress;
         // Hold direct reference to ServerOptions since this is used very often in the request processing path
         private KestrelServerOptions ServerOptions { get; }
         private IPEndPoint LocalEndPoint => ConnectionContext.LocalEndPoint;
