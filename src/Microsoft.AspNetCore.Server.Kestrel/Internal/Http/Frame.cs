@@ -151,7 +151,7 @@ namespace Microsoft.AspNetCore.Server.Kestrel.Internal.Http
             set
             {
                 // GetKnownVersion returns versions which ReferenceEquals interned string
-                // As most common path, check for this only in fast-path and inline 
+                // As most common path, check for this only in fast-path and inline
                 if (ReferenceEquals(value, "HTTP/1.1"))
                 {
                     _httpVersion = Http.HttpVersion.Http11;
@@ -906,7 +906,7 @@ namespace Microsoft.AspNetCore.Server.Kestrel.Internal.Http
             {
                 if (!hasTransferEncoding && !responseHeaders.HasContentLength)
                 {
-                    if (appCompleted && StatusCode != 101)
+                    if (appCompleted && StatusCode != StatusCodes.Status101SwitchingProtocols)
                     {
                         // Since the app has completed and we are only now generating
                         // the headers we can safely set the Content-Length to 0.
@@ -921,7 +921,7 @@ namespace Microsoft.AspNetCore.Server.Kestrel.Internal.Http
                         //
                         // A server MUST NOT send a response containing Transfer-Encoding unless the corresponding
                         // request indicates HTTP/1.1 (or later).
-                        if (_httpVersion == Http.HttpVersion.Http11 && StatusCode != 101)
+                        if (_httpVersion == Http.HttpVersion.Http11 && StatusCode != StatusCodes.Status101SwitchingProtocols)
                         {
                             _autoChunk = true;
                             responseHeaders.SetRawTransferEncoding("chunked", _bytesTransferEncodingChunked);
