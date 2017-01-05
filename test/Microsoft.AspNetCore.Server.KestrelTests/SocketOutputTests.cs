@@ -233,7 +233,7 @@ namespace Microsoft.AspNetCore.Server.KestrelTests
                 var bufferSize = maxBytesPreCompleted;
                 var buffer = new ArraySegment<byte>(new byte[bufferSize], 0, bufferSize);
 
-                // Act 
+                // Act
                 var writeTask1 = socketOutput.WriteAsync(buffer, default(CancellationToken));
 
                 // Assert
@@ -244,7 +244,7 @@ namespace Microsoft.AspNetCore.Server.KestrelTests
                 var writeTask2 = socketOutput.WriteAsync(buffer, default(CancellationToken));
                 await mockLibuv.OnPostTask;
 
-                // Assert 
+                // Assert
                 // Too many bytes are already pre-completed for the second write to pre-complete.
                 Assert.False(writeTask2.IsCompleted);
 
@@ -306,7 +306,7 @@ namespace Microsoft.AspNetCore.Server.KestrelTests
                 var data = new byte[bufferSize];
                 var halfWriteBehindBuffer = new ArraySegment<byte>(data, 0, bufferSize);
 
-                // Act 
+                // Act
                 var writeTask1 = socketOutput.WriteAsync(halfWriteBehindBuffer, default(CancellationToken));
 
                 // Assert
@@ -324,7 +324,7 @@ namespace Microsoft.AspNetCore.Server.KestrelTests
                 // Act
                 var writeTask2 = socketOutput.WriteAsync(halfWriteBehindBuffer, default(CancellationToken));
 
-                // Assert 
+                // Assert
                 // Too many bytes are already pre-completed for the fourth write to pre-complete.
                 await mockLibuv.OnPostTask;
                 Assert.True(writeRequested);
@@ -394,7 +394,7 @@ namespace Microsoft.AspNetCore.Server.KestrelTests
 
                     var cts = new CancellationTokenSource();
 
-                    // Act 
+                    // Act
                     var task1Success = socketOutput.WriteAsync(fullBuffer, cancellationToken: cts.Token);
                     // task1 should complete successfully as < _maxBytesPreCompleted
 
@@ -415,7 +415,7 @@ namespace Microsoft.AspNetCore.Server.KestrelTests
                     Assert.False(task2Throw.IsCanceled);
                     Assert.False(task2Throw.IsFaulted);
 
-                    // Third task is not completed 
+                    // Third task is not completed
                     Assert.False(task3Success.IsCompleted);
                     Assert.False(task3Success.IsCanceled);
                     Assert.False(task3Success.IsFaulted);
@@ -429,7 +429,7 @@ namespace Microsoft.AspNetCore.Server.KestrelTests
                     // Third task is now completed
                     await task3Success;
 
-                    // Fourth task immediately cancels as the token is canceled 
+                    // Fourth task immediately cancels as the token is canceled
                     var task4Throw = socketOutput.WriteAsync(fullBuffer, cancellationToken: cts.Token);
 
                     Assert.True(task4Throw.IsCompleted);
@@ -510,7 +510,7 @@ namespace Microsoft.AspNetCore.Server.KestrelTests
                     var data = new byte[bufferSize];
                     var fullBuffer = new ArraySegment<byte>(data, 0, bufferSize);
 
-                    // Act 
+                    // Act
                     var task1Success = socketOutput.WriteAsync(fullBuffer, cancellationToken: abortedSource.Token);
                     // task1 should complete successfully as < _maxBytesPreCompleted
 
@@ -531,7 +531,7 @@ namespace Microsoft.AspNetCore.Server.KestrelTests
                     Assert.False(task2Success.IsCanceled);
                     Assert.False(task2Success.IsFaulted);
 
-                    // Third task is not completed 
+                    // Third task is not completed
                     Assert.False(task3Canceled.IsCompleted);
                     Assert.False(task3Canceled.IsCanceled);
                     Assert.False(task3Canceled.IsFaulted);
@@ -619,7 +619,7 @@ namespace Microsoft.AspNetCore.Server.KestrelTests
                 Assert.True(completeQueue.TryDequeue(out triggerNextCompleted));
                 triggerNextCompleted(0);
 
-                // Assert 
+                // Assert
                 // Too many bytes are already pre-completed for the third but not the second write to pre-complete.
                 // https://github.com/aspnet/KestrelHttpServer/issues/356
                 Assert.Equal(TaskStatus.RanToCompletion, writeTask2.Status);
@@ -753,7 +753,7 @@ namespace Microsoft.AspNetCore.Server.KestrelTests
                 Action<int> triggerNextCompleted;
                 Assert.True(completeQueue.TryDequeue(out triggerNextCompleted));
                 triggerNextCompleted(0);
-                await  mockLibuv.OnPostTask;
+                await mockLibuv.OnPostTask;
                 Assert.True(writeCalled);
 
                 // Cleanup
@@ -859,6 +859,51 @@ namespace Microsoft.AspNetCore.Server.KestrelTests
                 Assert.True(start.IsDefault);
                 // ProducingComplete should not throw given a default iterator
                 socketOutput.ProducingComplete(start);
+            }
+        }
+
+        [Fact]
+        public async Task NoDeadlockOnCancellationWhileWriting()
+        {
+            var mockLibuv = new MockLibuv();
+
+            using (var kestrelEngine = new KestrelEngine(mockLibuv, new TestServiceContext()))
+            {
+                var kestrelThread = new KestrelThread(kestrelEngine, maxLoops: 1);
+                kestrelEngine.Threads.Add(kestrelThread);
+                await kestrelThread.StartAsync().ConfigureAwait(false);
+
+                var socket = new MockSocket(mockLibuv, kestrelThread.Loop.ThreadId, new TestKestrelTrace());
+                var trace = new KestrelTrace(new TestKestrelTrace());
+                var ltp = new LoggingThreadPool(trace);
+                var serverOptions = new KestrelServerOptions();
+                serverOptions.Limits.MaxResponseBufferSize = 0;
+                var socketOutput = new SocketOutput(kestrelThread, socket, new MockConnection(serverOptions), "0", trace, ltp);
+                var disposingEvent = new ManualResetEventSlim(false, 0);
+                var cancellationTriggeredEvent = new ManualResetEventSlim(false, 0);
+                socketOutput.OnCancellationTokenRegistrationDispose += () =>
+                {
+                    disposingEvent.Set();
+                    cancellationTriggeredEvent.Wait();
+                };
+                socketOutput.OnCancellationTriggered += () =>
+                {
+                    disposingEvent.Wait();
+                    cancellationTriggeredEvent.Set();
+                };
+
+                var cts = new CancellationTokenSource();
+                var buffer = new ArraySegment<byte>(new byte[1]);
+                var writeTask = socketOutput.WriteAsync(buffer, cts.Token);
+                var cancelTask = Task.Run(() => cts.Cancel());
+
+                await cancelTask;
+                await Assert.ThrowsAsync<TaskCanceledException>(async () => await writeTask);
+                await mockLibuv.OnPostTask;
+
+                // Cleanup
+                var cleanupTask = socketOutput.WriteAsync(
+                    default(ArraySegment<byte>), default(CancellationToken), socketDisconnect: true);
             }
         }
     }

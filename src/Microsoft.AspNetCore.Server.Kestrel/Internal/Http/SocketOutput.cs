@@ -15,6 +15,13 @@ namespace Microsoft.AspNetCore.Server.Kestrel.Internal.Http
 {
     public class SocketOutput : ISocketOutput
     {
+#if DEBUG
+        public delegate void CancellationTokenRegistrationDisposeHandler();
+        public event CancellationTokenRegistrationDisposeHandler OnCancellationTokenRegistrationDispose;
+
+        public delegate void CancellationTriggeredHandler();
+        public event CancellationTriggeredHandler OnCancellationTriggered;
+#endif
         private const int _maxPendingWrites = 3;
         // There should be never be more WriteContexts than the max ongoing writes +  1 for the next write to be scheduled.
         private const int _maxPooledWriteContexts = _maxPendingWrites + 1;
@@ -169,7 +176,7 @@ namespace Microsoft.AspNetCore.Server.Kestrel.Internal.Http
                             _tasksPending.Enqueue(new WaitingTask()
                             {
                                 CancellationToken = cancellationToken,
-                                CancellationRegistration = cancellationToken.Register(_connectionCancellation, this),
+                                CancellationRegistration = cancellationToken.SafeRegister(_connectionCancellation, this),
                                 BytesToWrite = buffer.Count,
                                 CompletionSource = tcs
                             });
@@ -298,6 +305,9 @@ namespace Microsoft.AspNetCore.Server.Kestrel.Internal.Http
 
         private void CancellationTriggered()
         {
+#if DEBUG
+            OnCancellationTriggered?.Invoke();
+#endif
             lock (_contextLock)
             {
                 if (!_cancelled)
@@ -424,6 +434,10 @@ namespace Microsoft.AspNetCore.Server.Kestrel.Internal.Http
 
             _numBytesPreCompleted += bytesToWrite;
             bytesLeftToBuffer -= bytesToWrite;
+
+#if DEBUG
+            OnCancellationTokenRegistrationDispose?.Invoke();
+#endif
 
             // Dispose registration if there is one
             waitingTask.CancellationRegistration?.Dispose();
