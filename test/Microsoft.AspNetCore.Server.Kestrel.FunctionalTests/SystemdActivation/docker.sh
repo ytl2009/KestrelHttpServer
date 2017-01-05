@@ -8,6 +8,7 @@ source ./.build/KoreBuild.sh -r $repoDir --quiet
 dotnet restore
 dotnet publish ./samples/SampleApp/
 cp -R ./samples/SampleApp/bin/Debug/netcoreapp1.1/publish/ $scriptDir
+cp -R ~/.dotnet/ $scriptDir
 
 image=$(docker build -qf $scriptDir/Dockerfile $scriptDir)
 container=$(docker run -Ptd --privileged $image)
