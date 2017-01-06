@@ -8,20 +8,12 @@ namespace Microsoft.AspNetCore.Server.Kestrel.Internal.Infrastructure
 {
     internal static class CancellationTokenExtensions
     {
-        private delegate CancellationTokenRegistration RegisterDelegate(ref CancellationToken token, Action<object> callback, object state);
-
-        private static readonly RegisterDelegate _tokenRegister = ResolveRegisterDelegate();
-
         public static IDisposable SafeRegister(this CancellationToken cancellationToken, Action<object> callback, object state)
         {
             var callbackWrapper = new CancellationCallbackWrapper(callback, state);
+            var registration = cancellationToken.Register(s => InvokeCallback(s), callbackWrapper);
+            var disposeCancellationState = new DisposeCancellationState(callbackWrapper, registration);
 
-            // Ensure delegate continues to use the C# Compiler static delegate caching optimization.
-            CancellationTokenRegistration registration = _tokenRegister(ref cancellationToken, s => InvokeCallback(s), callbackWrapper);
-
-            var disposeCancellationState = new DiposeCancellationState(callbackWrapper, registration);
-
-            // Ensure delegate continues to use the C# Compiler static delegate caching optimization.
             return new DisposableAction(s => Dispose(s), disposeCancellationState);
         }
 
@@ -32,26 +24,15 @@ namespace Microsoft.AspNetCore.Server.Kestrel.Internal.Infrastructure
 
         private static void Dispose(object state)
         {
-            ((DiposeCancellationState)state).TryDispose();
+            ((DisposeCancellationState)state).TryDispose();
         }
 
-        private static RegisterDelegate ResolveRegisterDelegate()
-        {
-            // The fallback is just a normal register that capatures the execution context.
-            RegisterDelegate fallback = (ref CancellationToken token, Action<object> callback, object state) =>
-            {
-                return token.Register(callback, state);
-            };
-
-            return fallback;
-        }
-
-        private class DiposeCancellationState
+        private class DisposeCancellationState
         {
             private readonly CancellationCallbackWrapper _callbackWrapper;
             private readonly CancellationTokenRegistration _registration;
 
-            public DiposeCancellationState(CancellationCallbackWrapper callbackWrapper, CancellationTokenRegistration registration)
+            public DisposeCancellationState(CancellationCallbackWrapper callbackWrapper, CancellationTokenRegistration registration)
             {
                 _callbackWrapper = callbackWrapper;
                 _registration = registration;
@@ -59,10 +40,8 @@ namespace Microsoft.AspNetCore.Server.Kestrel.Internal.Infrastructure
 
             public void TryDispose()
             {
-                // This normally waits until the callback is finished invoked but we don't care
                 if (_callbackWrapper.TrySetInvoked())
                 {
-                    // Bug #1549, .NET 4.0 has a bug where this throws if the CTS
                     _registration.Dispose();
                 }
             }

@@ -35,16 +35,6 @@ namespace Microsoft.AspNetCore.Server.KestrelTests.TestHelpers
                 return 0;
             };
 
-            OnErrName = statusCode =>
-            {
-                return null;
-            };
-
-            OnStrError = statusCode =>
-            {
-                return null;
-            };
-
             _uv_write = UvWrite;
 
             _uv_async_send = postHandle =>
@@ -128,8 +118,8 @@ namespace Microsoft.AspNetCore.Server.KestrelTests.TestHelpers
             _uv_close = (handle, callback) => callback(handle);
             _uv_loop_close = handle => 0;
             _uv_walk = (loop, callback, ignore) => 0;
-            _uv_err_name = errno => Marshal.StringToHGlobalAnsi(OnErrName(errno));
-            _uv_strerror = errno => Marshal.StringToHGlobalAnsi(OnStrError(errno));
+            _uv_err_name = errno => IntPtr.Zero;
+            _uv_strerror = errno => IntPtr.Zero;
             _uv_read_start = UvReadStart;
             _uv_read_stop = handle => 0;
             _uv_unsafe_async_send = handle =>
@@ -144,10 +134,6 @@ namespace Microsoft.AspNetCore.Server.KestrelTests.TestHelpers
         }
 
         public Func<UvStreamHandle, int, Action<int>, int> OnWrite { get; set; }
-
-        public Func<int, string> OnErrName { get; set; }
-
-        public Func<int, string> OnStrError { get; set; }
 
         public uv_alloc_cb AllocCallback { get; set; }
 
